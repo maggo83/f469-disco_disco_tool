@@ -11,7 +11,7 @@ def ocd():
     """OpenOCD server management.
 
     OpenOCD (Open On-Chip Debugger) provides JTAG/SWD access to the
-    STM32F469 via the ST-LINK interface on the MicroUSB connector.
+    STM32F469 via the ST-LINK interface on the MiniUSB connector (CN1, top of board).
 
     \b
     Most commands auto-connect to OpenOCD when needed. If OpenOCD wasn't
@@ -32,7 +32,7 @@ def ocd():
 
     \b
     Troubleshooting:
-      - Check MicroUSB cable is connected to ST-LINK port
+      - Check MiniUSB cable is connected to ST-LINK port (CN1, top of board)
       - Run 'disco cables' to verify JTAG connection
       - Check /tmp/openocd.log for errors
     """

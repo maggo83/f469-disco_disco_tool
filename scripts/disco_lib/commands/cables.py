@@ -140,7 +140,7 @@ def cables():
         click.secho(f"USB detection error: {usb['error']}", fg="yellow")
         click.echo()
 
-    click.echo("MicroUSB (ST-LINK connector):")
+    click.echo("MiniUSB (ST-LINK connector, CN1 — top of board):")
     if not usb["stlink"]:
         if usb_subsystem_errors:
             click.secho("  USB: NOT DETECTED - USB subsystem errors (see below)", fg="red")
@@ -159,7 +159,7 @@ def cables():
         click.secho("  Serial (VCP): not detected", fg="yellow")
 
     click.echo()
-    click.echo("MiniUSB (USB OTG connector):")
+    click.echo("MicroUSB (USB OTG connector, CN13 — bottom of board):")
     if not usb["micropython"]:
         if usb_subsystem_errors:
             click.secho("  USB: NOT DETECTED - USB subsystem errors (see below)", fg="red")
@@ -186,4 +186,4 @@ def cables():
     elif not usb["stlink"]:
         click.secho("Tip: ST-LINK cable not connected or bad cable", fg="yellow")
     elif not usb_otg_serial:
-        click.secho("Tip: Connect miniUSB cable for REPL access", fg="yellow")
+        click.secho("Tip: Connect microUSB cable for REPL access (CN13, bottom of board)", fg="yellow")
