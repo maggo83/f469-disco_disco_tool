@@ -35,13 +35,13 @@ def serial():
     """Serial/REPL communication.
 
     Communicate with the MicroPython REPL via USB CDC serial. The REPL
-    is available on the USB OTG port (miniUSB connector), not the ST-LINK
-    port (microUSB).
+    is available on the USB OTG port (microUSB connector, CN13 bottom), not the ST-LINK
+    port (miniUSB, CN1 top).
 
     \b
     USB Connections (STM32F469-Discovery):
-      MicroUSB (CN1)  - ST-LINK: JTAG/SWD + Virtual COM Port (VCP)
-      MiniUSB (CN13)  - USB OTG: MicroPython REPL (CDC serial)
+      MiniUSB  (CN1)  - ST-LINK: JTAG/SWD + Virtual COM Port (VCP)  [top of board]
+      MicroUSB (CN13) - USB OTG: MicroPython REPL (CDC serial)         [bottom of board]
 
     \b
     Device Detection:
@@ -59,7 +59,7 @@ def serial():
     \b
     Troubleshooting:
       - Run 'disco cables' to check USB connections
-      - Ensure miniUSB cable is connected for REPL
+      - Ensure microUSB cable is connected for REPL (CN13, bottom of board)
       - USB CDC only appears after firmware enables USB communication
       - If no response, try 'disco serial console' for interactive debug
 
@@ -100,8 +100,8 @@ def serial_repl(timeout: int):
     click.secho(f"=== REPL Test ({timeout}s timeout) ===", fg="blue")
 
     if not _check_usb_otg_connected():
-        click.secho("Warning: USB OTG (miniUSB) not detected!", fg="red")
-        click.secho("REPL requires miniUSB cable connected to USB OTG port", fg="yellow")
+        click.secho("Warning: USB OTG (microUSB) not detected!", fg="red")
+        click.secho("REPL requires microUSB cable connected to USB OTG port (CN13, bottom of board)", fg="yellow")
         click.echo()
 
     dev = _ser.require_device()
