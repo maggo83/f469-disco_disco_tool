@@ -1718,6 +1718,72 @@ uint8_t BSP_LCD_DrawBitmapRaw(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uint
 }
 
 /**
+  * @brief  Non-blocking variant of BSP_LCD_DrawBitmapRaw.
+  *
+  * Issues a SINGLE 2D DMA2D transfer covering the whole rectangle (with proper
+  * line offsets) and returns immediately. The caller is responsible for
+  * registering hdma2d_eval.XferCpltCallback to be notified of completion and
+  * for not modifying the source buffer before completion.
+  */
+uint8_t BSP_LCD_DrawBitmapRaw_IT(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uint32_t Height,
+                                 uint32_t ColorBits, const void *pPixelData)
+{
+  uint32_t Address;
+  uint32_t InputColorMode = 0;
+
+  /* Validate parameters */
+  if( !Width || !Height || !ColorBits || !pPixelData ||
+      Xpos + Width > BSP_LCD_GetXSize() || Ypos + Height > BSP_LCD_GetYSize() )
+  {
+    return LCD_ERROR;
+  }
+
+  /* Determine input color mode + alignment check */
+  if (ColorBits == 32)
+  {
+    InputColorMode = CM_ARGB8888;
+    if((uint32_t)pPixelData & 0x3) return LCD_ERROR;
+  }
+  else if (ColorBits == 16)
+  {
+    InputColorMode = CM_RGB565;
+    if((uint32_t)pPixelData & 0x1) return LCD_ERROR;
+  }
+  else if (ColorBits == 24)
+  {
+    InputColorMode = CM_RGB888;
+    if((uint32_t)pPixelData & 0x3) return LCD_ERROR;
+  }
+  else return LCD_ERROR;
+
+  /* Destination address in framebuffer (always ARGB8888 / 4 bytes per pixel) */
+  Address = hltdc_eval.LayerCfg[ActiveLayer].FBStartAdress
+            + (((BSP_LCD_GetXSize() * Ypos) + Xpos) * 4);
+
+  /* Configure DMA2D: 2D transfer, source contiguous, destination has stride */
+  hdma2d_eval.Instance              = DMA2D;
+  hdma2d_eval.Init.Mode             = DMA2D_M2M_PFC;
+  hdma2d_eval.Init.ColorMode        = DMA2D_ARGB8888;
+  hdma2d_eval.Init.OutputOffset     = BSP_LCD_GetXSize() - Width; /* dst stride - width */
+
+  hdma2d_eval.LayerCfg[1].AlphaMode      = DMA2D_NO_MODIF_ALPHA;
+  hdma2d_eval.LayerCfg[1].InputAlpha     = 0xFF;
+  hdma2d_eval.LayerCfg[1].InputColorMode = InputColorMode;
+  hdma2d_eval.LayerCfg[1].InputOffset    = 0; /* source rows are contiguous */
+
+  if (HAL_DMA2D_Init(&hdma2d_eval) != HAL_OK)       return LCD_ERROR;
+  if (HAL_DMA2D_ConfigLayer(&hdma2d_eval, 1) != HAL_OK) return LCD_ERROR;
+
+  /* Single 2D transfer: xSize=Width, ySize=Height */
+  if (HAL_DMA2D_Start_IT(&hdma2d_eval, (uint32_t)pPixelData, Address, Width, Height) != HAL_OK)
+  {
+    return LCD_ERROR;
+  }
+
+  return LCD_OK;
+}
+
+/**
   * @}
   */
 
