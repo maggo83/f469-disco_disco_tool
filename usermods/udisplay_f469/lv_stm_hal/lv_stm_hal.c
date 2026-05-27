@@ -49,26 +49,31 @@ void tft_init(void) {
     hdma2d_eval.XferCpltCallback  = tft_dma2d_xfer_cplt_cb;
     hdma2d_eval.XferErrorCallback = tft_dma2d_xfer_err_cb;
 
-	// FIXME: try two full-screen buffers in SRAM
-	static lv_color_t buf1[LV_HOR_RES_MAX * 30];
+    /* Phase 1.2: render in RGB565 to halve draw-buffer bandwidth.
+     * DMA2D converts RGB565 -> ARGB8888 on the fly during the flush. With the
+     * same ~57 KB SRAM footprint we get 60 scanlines per buffer (vs. 30 at
+     * 32 bpp), so LVGL needs ~half as many flush callbacks per screen. */
+    static uint16_t buf1[LV_HOR_RES_MAX * 60];
     lv_display_t *disp = lv_display_create(LV_HOR_RES_MAX, LV_VER_RES_MAX);
+    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
     lv_display_set_flush_cb(disp, tft_flush);
     lv_display_set_buffers(disp, buf1, NULL, sizeof(buf1), LV_DISPLAY_RENDER_MODE_PARTIAL);
 }
 
 static void tft_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map) {
 
-#if LV_COLOR_DEPTH == 32
     uint8_t result = LCD_ERROR;
 
     if(area->x2 >= area->x1 && area->y2 >= area->y1 && px_map) {
         /* Mark the in-flight display BEFORE starting the transfer so that an
          * already-pending IRQ (very short transfers) is handled correctly. */
         s_disp_in_flight = disp;
+        /* px_map is RGB565 (16 bpp). DMA2D will convert to ARGB8888 in the
+         * framebuffer during the single 2D transfer. */
         result = BSP_LCD_DrawBitmapRaw_IT( area->x1, area->y1,
                                            area->x2 - area->x1 + 1,
                                            area->y2 - area->y1 + 1,
-                                           LV_COLOR_DEPTH, px_map );
+                                           16, px_map );
         if (result != LCD_OK) {
             /* Failed to start: clear marker and report ready synchronously so
              * LVGL does not stall. */
@@ -79,9 +84,6 @@ static void tft_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px_
         /* Completion will be signalled from the DMA2D IRQ callback. */
         return;
     }
-#else
-#   error "Unsupported LV_COLOR_DEPTH"
-#endif
 
     /* Nothing to flush (degenerate area): release immediately. */
     lv_display_flush_ready(disp);
