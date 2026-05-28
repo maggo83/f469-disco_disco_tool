@@ -340,11 +340,36 @@ void     BSP_LCD_DrawEllipse(int Xpos, int Ypos, int XRadius, int YRadius);
 void     BSP_LCD_DrawBitmap(uint32_t Xpos, uint32_t Ypos, uint8_t *pbmp);
 uint8_t  BSP_LCD_DrawBitmapRaw(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uint32_t Height, 
                                uint32_t ColorBits, const void *pPixelData);
-/* Non-blocking variant: issues a single 2D DMA2D transfer and returns immediately.
- * Caller must register hdma2d_eval.XferCpltCallback / XferErrorCallback to be notified.
- */
-uint8_t  BSP_LCD_DrawBitmapRaw_IT(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uint32_t Height,
-                                  uint32_t ColorBits, const void *pPixelData);
+/* Non-blocking variant of BSP_LCD_DrawBitmapRaw: a single 2D DMA2D transfer
+ * into the framebuffer at FbBase, which need not be the displayed one.
+ * Completion is reported through hdma2d_eval.XferCpltCallback and
+ * XferErrorCallback. The framebuffer is ARGB8888 with the screen width as
+ * stride.
+ *
+ * SrcPitchPx is the source row pitch in PIXELS (not bytes). Pass 0 to
+ * default to Width (tightly-packed source rows). LVGL v9 aligns row
+ * strides to LV_DRAW_BUF_STRIDE_ALIGN bytes, so for RGB565 sources with
+ * odd Width an extra padding pixel is present per row; in that case the
+ * caller must pass SrcPitchPx = aligned pitch to avoid diagonal skew. */
+uint8_t  BSP_LCD_DrawBitmapRaw_IT_To(uint32_t FbBase,
+                                     uint32_t Xpos, uint32_t Ypos,
+                                     uint32_t Width, uint32_t Height,
+                                     uint32_t ColorBits, const void *pPixelData,
+                                     uint32_t SrcPitchPx);
+
+/* Non-blocking DMA2D copy of a rectangle between two ARGB8888 framebuffers
+ * with the screen width as stride. Source and destination positions may
+ * differ, as the transition compositor reads pixels from a shifted
+ * position in the previous frame. */
+uint8_t  BSP_LCD_CopyRectEx_IT(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                               uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                               uint32_t Width, uint32_t Height);
+
+/* Blocking variant of BSP_LCD_CopyRectEx_IT, used before a transition
+ * starts. */
+uint8_t  BSP_LCD_CopyRectEx(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                            uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                            uint32_t Width, uint32_t Height);
 
 void     BSP_LCD_FillRect(uint16_t Xpos, uint16_t Ypos, uint16_t Width, uint16_t Height);
 void     BSP_LCD_FillCircle(uint16_t Xpos, uint16_t Ypos, uint16_t Radius);
@@ -365,6 +390,8 @@ uint32_t BSP_LCD_ReadDisplayModel(uint8_t * arr, uint16_t len);
 
 /* @brief DMA2D handle variable */
 extern DMA2D_HandleTypeDef hdma2d_eval;
+/* @brief LTDC handle variable (defined in stm32469i_discovery_lcd.c) */
+extern LTDC_HandleTypeDef  hltdc_eval;
 
 /**
   * @}
