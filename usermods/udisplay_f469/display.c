@@ -78,7 +78,7 @@ STATIC void transition_done_trampoline(void *arg) {
 }
 
 STATIC mp_obj_t display_transition(size_t n_args, const mp_obj_t *args) {
-    /* Signature: udisplay.transition(type, dur_ms, x, y, w, h, [cb]) */
+    /* Signature: udisplay.transition(type, dur_ms, x, y, w, h, [cb, [easing]]) */
     int anim_type = mp_obj_get_int(args[0]);
     uint32_t dur_ms = (uint32_t)mp_obj_get_int(args[1]);
     int rx = mp_obj_get_int(args[2]);
@@ -86,9 +86,13 @@ STATIC mp_obj_t display_transition(size_t n_args, const mp_obj_t *args) {
     int rw = mp_obj_get_int(args[4]);
     int rh = mp_obj_get_int(args[5]);
     mp_obj_t cb = (n_args > 6) ? args[6] : mp_const_none;
+    int easing = (n_args > 7) ? mp_obj_get_int(args[7]) : TFT_EASING_LINEAR;
     if (rx < 0 || ry < 0 || rw <= 0 || rh <= 0 ||
         rx > 0xFFFF || ry > 0xFFFF || rw > 0xFFFF || rh > 0xFFFF) {
         mp_raise_ValueError(MP_ERROR_TEXT("invalid rect"));
+    }
+    if (easing < 0 || easing >= TFT_EASING__COUNT) {
+        mp_raise_ValueError(MP_ERROR_TEXT("invalid easing"));
     }
     if (tft_transition_active()) {
         mp_raise_OSError(MP_EBUSY);
@@ -97,6 +101,7 @@ STATIC mp_obj_t display_transition(size_t n_args, const mp_obj_t *args) {
     int rc = tft_transition_start(anim_type, dur_ms,
                                   (uint16_t)rx, (uint16_t)ry,
                                   (uint16_t)rw, (uint16_t)rh,
+                                  (uint8_t)easing,
                                   transition_done_trampoline, NULL);
     if (rc != 0) {
         s_transition_done_cb = mp_const_none;
@@ -104,7 +109,7 @@ STATIC mp_obj_t display_transition(size_t n_args, const mp_obj_t *args) {
     }
     return mp_const_none;
 }
-STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(display_transition_obj, 6, 7, display_transition);
+STATIC MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(display_transition_obj, 6, 8, display_transition);
 
 STATIC mp_obj_t display_transition_active(void) {
     return mp_obj_new_bool(tft_transition_active());
@@ -134,6 +139,11 @@ STATIC const mp_rom_map_elem_t display_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_rotation), MP_ROM_PTR(&display_set_rotation_obj) },
     { MP_ROM_QSTR(MP_QSTR_transition), MP_ROM_PTR(&display_transition_obj) },
     { MP_ROM_QSTR(MP_QSTR_transition_active), MP_ROM_PTR(&display_transition_active_obj) },
+    { MP_ROM_QSTR(MP_QSTR_EASING_LINEAR),            MP_ROM_INT(TFT_EASING_LINEAR) },
+    { MP_ROM_QSTR(MP_QSTR_EASING_EASE_IN_CUBIC),     MP_ROM_INT(TFT_EASING_EASE_IN_CUBIC) },
+    { MP_ROM_QSTR(MP_QSTR_EASING_EASE_OUT_CUBIC),    MP_ROM_INT(TFT_EASING_EASE_OUT_CUBIC) },
+    { MP_ROM_QSTR(MP_QSTR_EASING_EASE_IN_OUT_CUBIC), MP_ROM_INT(TFT_EASING_EASE_IN_OUT_CUBIC) },
+    { MP_ROM_QSTR(MP_QSTR_EASING_EASE_OUT_QUINT),    MP_ROM_INT(TFT_EASING_EASE_OUT_QUINT) },
 };
 STATIC MP_DEFINE_CONST_DICT(display_module_globals, display_module_globals_table);
 

@@ -136,6 +136,7 @@ static volatile uint16_t s_anim_rect_w   = 0;
 static volatile uint16_t s_anim_rect_h   = 0;
 static volatile uint8_t  s_anim_final    = 0; /* set when the in-flight compose
                                                  is the t=1.0 (final) frame */
+static volatile uint8_t  s_anim_easing   = TFT_EASING_LINEAR; /* selected curve */
 /* Per-tick step bookkeeping. */
 static volatile uint8_t  s_compose_step   = CSTEP_DONE;
 static void (*s_anim_on_done_cb)(void *) = NULL;
@@ -357,6 +358,85 @@ static void compose_run(uint8_t starting_step) {
     s_compose_swap_pending = 1;
 }
 
+/* ============== Easing curves =======================================
+ *
+ * Each curve maps t in 0..1024 (linear normalised elapsed time) to an
+ * eased value in 0..1024. Curves must be monotone non-decreasing and
+ * satisfy f(0) == 0, f(1024) == 1024 so the compositor's monotonic
+ * pixel-offset clamp never trims the animation and so the final frame
+ * is always exactly at the requested rect extent.
+ *
+ * To add a curve: write a `static uint32_t tft_ease_<name>(uint32_t)`
+ * here, append the matching TFT_EASING_<NAME> id in lv_stm_hal.h, and
+ * add the pointer to s_easing_table[] at the same index.
+ *
+ * Implementation notes:
+ *   - Everything runs in the LTDC reload IRQ. No heap, no divisions
+ *     (a single >> 10 per multiplication is the price of 1024-scale
+ *     fixed point). Cubic costs three multiplies and one shift.
+ *   - All curves are written to be safe at the endpoints without a
+ *     branch: at t=0 the result is exactly 0, at t=1024 exactly 1024.
+ */
+
+typedef uint32_t (*tft_easing_fn_t)(uint32_t t_q);
+
+static uint32_t tft_ease_linear(uint32_t t_q) {
+    return t_q;
+}
+
+static uint32_t tft_ease_in_cubic(uint32_t t_q) {
+    /* f(t) = t^3 */
+    uint32_t t2 = (t_q * t_q) >> 10;
+    return (t2 * t_q) >> 10;
+}
+
+static uint32_t tft_ease_out_cubic(uint32_t t_q) {
+    /* f(t) = 1 - (1-t)^3 */
+    uint32_t u  = 1024u - t_q;
+    uint32_t u2 = (u * u) >> 10;
+    uint32_t u3 = (u2 * u) >> 10;
+    return 1024u - u3;
+}
+
+static uint32_t tft_ease_in_out_cubic(uint32_t t_q) {
+    /* f(t) = 4 t^3                    for t < 0.5
+       f(t) = 1 - (-2t + 2)^3 / 2      for t >= 0.5 */
+    if (t_q < 512u) {
+        uint32_t t2 = (t_q * t_q) >> 10;
+        uint32_t t3 = (t2 * t_q) >> 10;
+        return t3 * 4u;
+    } else {
+        uint32_t u  = (1024u - t_q) * 2u;       /* 2 - 2t scaled to 0..1024 */
+        uint32_t u2 = (u * u) >> 10;
+        uint32_t u3 = (u2 * u) >> 10;
+        return 1024u - (u3 >> 1);
+    }
+}
+
+static uint32_t tft_ease_out_quint(uint32_t t_q) {
+    /* f(t) = 1 - (1-t)^5  -- a stronger ease-out than cubic */
+    uint32_t u  = 1024u - t_q;
+    uint32_t u2 = (u  * u ) >> 10;
+    uint32_t u4 = (u2 * u2) >> 10;
+    uint32_t u5 = (u4 * u ) >> 10;
+    return 1024u - u5;
+}
+
+/* Index matches TFT_EASING_* ids in lv_stm_hal.h. */
+static const tft_easing_fn_t s_easing_table[TFT_EASING__COUNT] = {
+    [TFT_EASING_LINEAR]            = tft_ease_linear,
+    [TFT_EASING_EASE_IN_CUBIC]     = tft_ease_in_cubic,
+    [TFT_EASING_EASE_OUT_CUBIC]    = tft_ease_out_cubic,
+    [TFT_EASING_EASE_IN_OUT_CUBIC] = tft_ease_in_out_cubic,
+    [TFT_EASING_EASE_OUT_QUINT]    = tft_ease_out_quint,
+};
+
+static inline uint32_t apply_easing(uint32_t t_q, uint8_t kind) {
+    if (kind >= TFT_EASING__COUNT) return t_q;
+    tft_easing_fn_t fn = s_easing_table[kind];
+    return fn ? fn(t_q) : t_q;
+}
+
 static void compose_kick_tick(uint32_t now_ms) {
     uint8_t type = s_anim_type;
     uint8_t is_vertical = (type == TFT_ANIM_VERTICAL_SLIDE_IN ||
@@ -381,7 +461,12 @@ static void compose_kick_tick(uint32_t now_ms) {
         return;
     }
 
-    uint32_t d = (extent * t_q) / 1024u;
+    /* Map linear time to eased position. Both axes are 0..1024 fixed
+     * point; see TFT_EASING_* / s_easing_table[] above. The final tick
+     * (is_final) always lands at 1024 so the rect ends exactly at full
+     * extent regardless of the chosen curve. */
+    uint32_t te_q = is_final ? 1024u : apply_easing(t_q, s_anim_easing);
+    uint32_t d = (extent * te_q) / 1024u;
     if (d < s_anim_d_prev) d = s_anim_d_prev; /* monotonic safety */
     s_anim_d_now = d;
 
@@ -440,10 +525,12 @@ int tft_transition_active(void) {
 int tft_transition_start(int anim_type, uint32_t duration_ms,
                          uint16_t rect_x, uint16_t rect_y,
                          uint16_t rect_w, uint16_t rect_h,
+                         uint8_t easing,
                          void (*on_done)(void *), void *arg) {
     if (s_anim_active) return -1;
     if (anim_type < TFT_ANIM_HORIZONTAL_SLIDE_IN ||
         anim_type > TFT_ANIM_VERTICAL_SLIDE_OUT) return -1;
+    if (easing >= TFT_EASING__COUNT) return -1;
     if (duration_ms == 0) duration_ms = 1;
     /* Clamp / validate rect. */
     if (rect_w == 0 || rect_h == 0) return -1;
@@ -490,6 +577,7 @@ int tft_transition_start(int anim_type, uint32_t duration_ms,
 
     /* 4. Wire callback and start the animation. */
     s_anim_type      = (uint8_t)anim_type;
+    s_anim_easing    = easing;
     s_anim_start_ms  = HAL_GetTick();
     s_anim_dur_ms    = duration_ms;
     s_anim_on_done_cb  = on_done;

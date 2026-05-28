@@ -23,6 +23,26 @@ void touchpad_init(void);
 #define TFT_ANIM_VERTICAL_SLIDE_IN     5
 #define TFT_ANIM_VERTICAL_SLIDE_OUT    6
 
+/* Easing kinds for the time->position mapping applied by the compositor
+ * at every VBLANK tick. Each kind maps the normalised elapsed time
+ * t in [0,1024] (fixed point, 1024 = end of animation) to an eased
+ * value t' in [0,1024] before computing the per-frame pixel offset.
+ *
+ * To add a new curve:
+ *   1. Implement a `static uint32_t tft_ease_<name>(uint32_t t_q)` in
+ *      lv_stm_hal.c (t_q and return both in 0..1024).
+ *   2. Append a TFT_EASING_<NAME> id below.
+ *   3. Add the function pointer to s_easing_table[] in lv_stm_hal.c at
+ *      the same index.
+ * Linear is the default and is what the compositor used before easing
+ * was introduced. */
+#define TFT_EASING_LINEAR              0
+#define TFT_EASING_EASE_IN_CUBIC       1
+#define TFT_EASING_EASE_OUT_CUBIC      2
+#define TFT_EASING_EASE_IN_OUT_CUBIC   3
+#define TFT_EASING_EASE_OUT_QUINT      4
+#define TFT_EASING__COUNT              5
+
 /* Returns 1 if a transition is currently animating. */
 int  tft_transition_active(void);
 
@@ -62,6 +82,7 @@ int  tft_transition_active(void);
 int  tft_transition_start(int anim_type, uint32_t duration_ms,
                           uint16_t rect_x, uint16_t rect_y,
                           uint16_t rect_w, uint16_t rect_h,
+                          uint8_t easing,
                           void (*on_done)(void *arg), void *on_done_arg);
 
 #ifdef __cplusplus
