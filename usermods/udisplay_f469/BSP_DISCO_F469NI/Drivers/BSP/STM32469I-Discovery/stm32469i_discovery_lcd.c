@@ -1728,11 +1728,22 @@ uint8_t BSP_LCD_DrawBitmapRaw(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uint
 uint8_t BSP_LCD_DrawBitmapRaw_IT(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uint32_t Height,
                                  uint32_t ColorBits, const void *pPixelData)
 {
+  return BSP_LCD_DrawBitmapRaw_IT_To(
+           hltdc_eval.LayerCfg[ActiveLayer].FBStartAdress,
+           Xpos, Ypos, Width, Height, ColorBits, pPixelData, 0);
+}
+
+uint8_t BSP_LCD_DrawBitmapRaw_IT_To(uint32_t FbBase,
+                                    uint32_t Xpos, uint32_t Ypos,
+                                    uint32_t Width, uint32_t Height,
+                                    uint32_t ColorBits, const void *pPixelData,
+                                    uint32_t SrcPitchPx)
+{
   uint32_t Address;
   uint32_t InputColorMode = 0;
 
   /* Validate parameters */
-  if( !Width || !Height || !ColorBits || !pPixelData ||
+  if( !FbBase || !Width || !Height || !ColorBits || !pPixelData ||
       Xpos + Width > BSP_LCD_GetXSize() || Ypos + Height > BSP_LCD_GetYSize() )
   {
     return LCD_ERROR;
@@ -1756,9 +1767,8 @@ uint8_t BSP_LCD_DrawBitmapRaw_IT(uint32_t Xpos, uint32_t Ypos, uint32_t Width, u
   }
   else return LCD_ERROR;
 
-  /* Destination address in framebuffer (always ARGB8888 / 4 bytes per pixel) */
-  Address = hltdc_eval.LayerCfg[ActiveLayer].FBStartAdress
-            + (((BSP_LCD_GetXSize() * Ypos) + Xpos) * 4);
+  /* Destination address in the requested framebuffer (ARGB8888 / 4 bpp) */
+  Address = FbBase + (((BSP_LCD_GetXSize() * Ypos) + Xpos) * 4);
 
   /* Configure DMA2D: 2D transfer, source contiguous, destination has stride */
   hdma2d_eval.Instance              = DMA2D;
@@ -1769,7 +1779,12 @@ uint8_t BSP_LCD_DrawBitmapRaw_IT(uint32_t Xpos, uint32_t Ypos, uint32_t Width, u
   hdma2d_eval.LayerCfg[1].AlphaMode      = DMA2D_NO_MODIF_ALPHA;
   hdma2d_eval.LayerCfg[1].InputAlpha     = 0xFF;
   hdma2d_eval.LayerCfg[1].InputColorMode = InputColorMode;
-  hdma2d_eval.LayerCfg[1].InputOffset    = 0; /* source rows are contiguous */
+  /* SrcPitchPx == 0 means rows are tightly packed (pitch = Width). */
+  {
+    uint32_t pitch = (SrcPitchPx == 0) ? Width : SrcPitchPx;
+    if (pitch < Width) return LCD_ERROR;
+    hdma2d_eval.LayerCfg[1].InputOffset = pitch - Width;
+  }
 
   if (HAL_DMA2D_Init(&hdma2d_eval) != HAL_OK)       return LCD_ERROR;
   if (HAL_DMA2D_ConfigLayer(&hdma2d_eval, 1) != HAL_OK) return LCD_ERROR;
@@ -1783,9 +1798,122 @@ uint8_t BSP_LCD_DrawBitmapRaw_IT(uint32_t Xpos, uint32_t Ypos, uint32_t Width, u
   return LCD_OK;
 }
 
-/**
-  * @}
-  */
+uint8_t BSP_LCD_CopyRect_IT(uint32_t SrcFb, uint32_t DstFb,
+                            uint32_t Xpos, uint32_t Ypos,
+                            uint32_t Width, uint32_t Height)
+{
+  uint32_t ScreenW = BSP_LCD_GetXSize();
+  uint32_t SrcAddr, DstAddr;
+
+  if (!SrcFb || !DstFb || !Width || !Height ||
+      Xpos + Width > ScreenW || Ypos + Height > BSP_LCD_GetYSize())
+  {
+    return LCD_ERROR;
+  }
+
+  SrcAddr = SrcFb + (((ScreenW * Ypos) + Xpos) * 4);
+  DstAddr = DstFb + (((ScreenW * Ypos) + Xpos) * 4);
+
+  hdma2d_eval.Instance              = DMA2D;
+  hdma2d_eval.Init.Mode             = DMA2D_M2M; /* no PFC, both sides ARGB8888 */
+  hdma2d_eval.Init.ColorMode        = DMA2D_ARGB8888;
+  hdma2d_eval.Init.OutputOffset     = ScreenW - Width;
+
+  hdma2d_eval.LayerCfg[1].AlphaMode      = DMA2D_NO_MODIF_ALPHA;
+  hdma2d_eval.LayerCfg[1].InputAlpha     = 0xFF;
+  hdma2d_eval.LayerCfg[1].InputColorMode = CM_ARGB8888;
+  hdma2d_eval.LayerCfg[1].InputOffset    = ScreenW - Width;
+
+  if (HAL_DMA2D_Init(&hdma2d_eval) != HAL_OK)            return LCD_ERROR;
+  if (HAL_DMA2D_ConfigLayer(&hdma2d_eval, 1) != HAL_OK)  return LCD_ERROR;
+
+  if (HAL_DMA2D_Start_IT(&hdma2d_eval, SrcAddr, DstAddr, Width, Height) != HAL_OK)
+  {
+    return LCD_ERROR;
+  }
+
+  return LCD_OK;
+}
+
+uint8_t BSP_LCD_CopyRectEx_IT(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                              uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                              uint32_t Width, uint32_t Height)
+{
+  uint32_t ScreenW = BSP_LCD_GetXSize();
+  uint32_t SrcAddr, DstAddr;
+
+  if (!SrcFb || !DstFb || !Width || !Height ||
+      SrcX + Width > ScreenW || SrcY + Height > BSP_LCD_GetYSize() ||
+      DstX + Width > ScreenW || DstY + Height > BSP_LCD_GetYSize())
+  {
+    return LCD_ERROR;
+  }
+
+  SrcAddr = SrcFb + (((ScreenW * SrcY) + SrcX) * 4);
+  DstAddr = DstFb + (((ScreenW * DstY) + DstX) * 4);
+
+  hdma2d_eval.Instance              = DMA2D;
+  hdma2d_eval.Init.Mode             = DMA2D_M2M;
+  hdma2d_eval.Init.ColorMode        = DMA2D_ARGB8888;
+  hdma2d_eval.Init.OutputOffset     = ScreenW - Width;
+
+  hdma2d_eval.LayerCfg[1].AlphaMode      = DMA2D_NO_MODIF_ALPHA;
+  hdma2d_eval.LayerCfg[1].InputAlpha     = 0xFF;
+  hdma2d_eval.LayerCfg[1].InputColorMode = CM_ARGB8888;
+  hdma2d_eval.LayerCfg[1].InputOffset    = ScreenW - Width;
+
+  if (HAL_DMA2D_Init(&hdma2d_eval) != HAL_OK)            return LCD_ERROR;
+  if (HAL_DMA2D_ConfigLayer(&hdma2d_eval, 1) != HAL_OK)  return LCD_ERROR;
+
+  if (HAL_DMA2D_Start_IT(&hdma2d_eval, SrcAddr, DstAddr, Width, Height) != HAL_OK)
+  {
+    return LCD_ERROR;
+  }
+
+  return LCD_OK;
+}
+
+uint8_t BSP_LCD_CopyRectEx(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                           uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                           uint32_t Width, uint32_t Height)
+{
+  uint32_t ScreenW = BSP_LCD_GetXSize();
+  uint32_t SrcAddr, DstAddr;
+
+  if (!SrcFb || !DstFb || !Width || !Height ||
+      SrcX + Width > ScreenW || SrcY + Height > BSP_LCD_GetYSize() ||
+      DstX + Width > ScreenW || DstY + Height > BSP_LCD_GetYSize())
+  {
+    return LCD_ERROR;
+  }
+
+  SrcAddr = SrcFb + (((ScreenW * SrcY) + SrcX) * 4);
+  DstAddr = DstFb + (((ScreenW * DstY) + DstX) * 4);
+
+  hdma2d_eval.Instance              = DMA2D;
+  hdma2d_eval.Init.Mode             = DMA2D_M2M;
+  hdma2d_eval.Init.ColorMode        = DMA2D_ARGB8888;
+  hdma2d_eval.Init.OutputOffset     = ScreenW - Width;
+
+  hdma2d_eval.LayerCfg[1].AlphaMode      = DMA2D_NO_MODIF_ALPHA;
+  hdma2d_eval.LayerCfg[1].InputAlpha     = 0xFF;
+  hdma2d_eval.LayerCfg[1].InputColorMode = CM_ARGB8888;
+  hdma2d_eval.LayerCfg[1].InputOffset    = ScreenW - Width;
+
+  if (HAL_DMA2D_Init(&hdma2d_eval) != HAL_OK)            return LCD_ERROR;
+  if (HAL_DMA2D_ConfigLayer(&hdma2d_eval, 1) != HAL_OK)  return LCD_ERROR;
+
+  if (HAL_DMA2D_Start(&hdma2d_eval, SrcAddr, DstAddr, Width, Height) != HAL_OK)
+  {
+    return LCD_ERROR;
+  }
+  if (HAL_DMA2D_PollForTransfer(&hdma2d_eval, 100) != HAL_OK)
+  {
+    return LCD_ERROR;
+  }
+
+  return LCD_OK;
+}
 
 /**
   * @}

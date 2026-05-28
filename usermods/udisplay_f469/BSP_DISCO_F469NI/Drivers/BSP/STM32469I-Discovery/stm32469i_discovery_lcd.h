@@ -346,6 +346,44 @@ uint8_t  BSP_LCD_DrawBitmapRaw(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uin
 uint8_t  BSP_LCD_DrawBitmapRaw_IT(uint32_t Xpos, uint32_t Ypos, uint32_t Width, uint32_t Height,
                                   uint32_t ColorBits, const void *pPixelData);
 
+/* Like BSP_LCD_DrawBitmapRaw_IT but writes into the framebuffer at the
+ * explicit base address FbBase (instead of the currently displayed layer's
+ * FBStartAdress). Used by double-buffered render paths that need to target
+ * the off-screen back buffer. The framebuffer is assumed to be ARGB8888
+ * with the standard screen width stride.
+ *
+ * SrcPitchPx is the source row pitch in PIXELS (not bytes). Pass 0 to
+ * default to Width (tightly-packed source rows). LVGL v9 aligns row
+ * strides to LV_DRAW_BUF_STRIDE_ALIGN bytes, so for RGB565 sources with
+ * odd Width an extra padding pixel is present per row; in that case the
+ * caller must pass SrcPitchPx = aligned pitch to avoid diagonal skew. */
+uint8_t  BSP_LCD_DrawBitmapRaw_IT_To(uint32_t FbBase,
+                                     uint32_t Xpos, uint32_t Ypos,
+                                     uint32_t Width, uint32_t Height,
+                                     uint32_t ColorBits, const void *pPixelData,
+                                     uint32_t SrcPitchPx);
+
+/* Non-blocking DMA2D rectangle copy between two ARGB8888 framebuffers (both
+ * with standard screen-width stride). Used by double-buffered code to bring
+ * the new back buffer in sync with the new front buffer after a swap. */
+uint8_t  BSP_LCD_CopyRect_IT(uint32_t SrcFb, uint32_t DstFb,
+                             uint32_t Xpos, uint32_t Ypos,
+                             uint32_t Width, uint32_t Height);
+
+/* Like BSP_LCD_CopyRect_IT but source and destination rectangle positions
+ * can differ -- needed by the Phase 3 transition compositor whose Option-C
+ * formula reads OLD pixels from a shifted position in the previous composite.
+ * Both framebuffers are ARGB8888 with standard screen-width stride. */
+uint8_t  BSP_LCD_CopyRectEx_IT(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                               uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                               uint32_t Width, uint32_t Height);
+
+/* Blocking (polling) variant of CopyRectEx -- used for the synchronous
+ * OLD-screen capture at the start of a transition. */
+uint8_t  BSP_LCD_CopyRectEx(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                            uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                            uint32_t Width, uint32_t Height);
+
 void     BSP_LCD_FillRect(uint16_t Xpos, uint16_t Ypos, uint16_t Width, uint16_t Height);
 void     BSP_LCD_FillCircle(uint16_t Xpos, uint16_t Ypos, uint16_t Radius);
 void     BSP_LCD_FillPolygon(pPoint Points, uint16_t PointCount);
@@ -365,6 +403,8 @@ uint32_t BSP_LCD_ReadDisplayModel(uint8_t * arr, uint16_t len);
 
 /* @brief DMA2D handle variable */
 extern DMA2D_HandleTypeDef hdma2d_eval;
+/* @brief LTDC handle variable (defined in stm32469i_discovery_lcd.c) */
+extern LTDC_HandleTypeDef  hltdc_eval;
 
 /**
   * @}
