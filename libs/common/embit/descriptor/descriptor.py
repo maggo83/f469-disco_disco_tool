@@ -33,9 +33,7 @@ class Descriptor(DescriptorBase):
             if miniscript.type != "B":
                 raise DescriptorError("Top level miniscript should be 'B'")
             # check all branches have the same length
-            branches = {
-                len(k.branches) for k in miniscript.keys if k.branches is not None
-            }
+            branches = {k.num_branches for k in miniscript.keys}
             if len(branches) > 1:
                 raise DescriptorError("All branches should have the same length")
         self.sh = sh
@@ -61,6 +59,9 @@ class Descriptor(DescriptorBase):
 
     @property
     def num_branches(self):
+        if self.miniscript is not None:
+            return max({k.num_branches for k in self.miniscript.keys})
+
         return max([k.num_branches for k in self.keys])
 
     def branch(self, branch_index=None):
@@ -294,7 +295,7 @@ class Descriptor(DescriptorBase):
     @classmethod
     def read_from(cls, s):
         # starts with sh(wsh()), sh() or wsh()
-        start = s.read(7)
+        start = s.read(8)
         sh = False
         wsh = False
         wpkh = False
@@ -303,30 +304,30 @@ class Descriptor(DescriptorBase):
         taptree = TapTree()
         if start.startswith(b"tr("):
             taproot = True
-            s.seek(-4, 1)
+            s.seek(-5, 1)
         elif start.startswith(b"sh(wsh("):
             sh = True
             wsh = True
+            s.seek(-1, 1)
         elif start.startswith(b"wsh("):
             sh = False
             wsh = True
-            s.seek(-3, 1)
-        elif start.startswith(b"sh(wpkh"):
+            s.seek(-4, 1)
+        elif start.startswith(b"sh(wpkh("):
             is_miniscript = False
             sh = True
             wpkh = True
-            assert s.read(1) == b"("
         elif start.startswith(b"wpkh("):
             is_miniscript = False
             wpkh = True
-            s.seek(-2, 1)
+            s.seek(-3, 1)
         elif start.startswith(b"pkh("):
             is_miniscript = False
-            s.seek(-3, 1)
+            s.seek(-4, 1)
         elif start.startswith(b"sh("):
             sh = True
             wsh = False
-            s.seek(-4, 1)
+            s.seek(-5, 1)
         else:
             raise ValueError("Invalid descriptor (starts with '%s')" % start.decode())
         # taproot always has a key, and may have taptree miniscript

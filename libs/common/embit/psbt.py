@@ -142,6 +142,7 @@ class InputScope(PSBTScope):
         self.taproot_bip32_derivations = OrderedDict()
         self.taproot_internal_key = None
         self.taproot_merkle_root = None
+        self.taproot_key_sig = None
         self.taproot_sigs = OrderedDict()
         self.taproot_scripts = OrderedDict()
 
@@ -187,6 +188,7 @@ class InputScope(PSBTScope):
         self.taproot_bip32_derivations.update(other.taproot_bip32_derivations)
         self.taproot_internal_key = other.taproot_internal_key
         self.taproot_merkle_root = other.taproot_merkle_root or self.taproot_merkle_root
+        self.taproot_key_sig = other.taproot_key_sig or self.taproot_key_sig
         self.taproot_sigs.update(other.taproot_sigs)
         self.taproot_scripts.update(other.taproot_scripts)
         self.final_scriptsig = other.final_scriptsig or self.final_scriptsig
@@ -350,7 +352,15 @@ class InputScope(PSBTScope):
         elif k == b"\x10":
             self.sequence = int.from_bytes(v, "little")
 
-        # TODO: 0x13 - tap key signature
+        # PSBT_IN_TAP_KEY_SIG
+        elif k[0] == 0x13:
+            # read the taproot key sig
+            if len(k) != 1:
+                raise PSBTError("Invalid taproot key signature key")
+            if self.taproot_key_sig is not None:
+                raise PSBTError("Duplicated taproot key signature")
+            self.taproot_key_sig = v
+
         # PSBT_IN_TAP_SCRIPT_SIG
         elif k[0] == 0x14:
             if len(k) != 65:
@@ -433,6 +443,11 @@ class InputScope(PSBTScope):
             if self.sequence is not None:
                 r += ser_string(stream, b"\x10")
                 r += ser_string(stream, self.sequence.to_bytes(4, "little"))
+
+        # PSBT_IN_TAP_KEY_SIG
+        if self.taproot_key_sig is not None:
+            r += ser_string(stream, b"\x13")
+            r += ser_string(stream, self.taproot_key_sig)
 
         # PSBT_IN_TAP_SCRIPT_SIG
         for pub, leaf in self.taproot_sigs:
@@ -881,11 +896,11 @@ class PSBT(EmbitBase):
                 sighash=sighash,
             )
             sig = pk.schnorr_sign(h)
-            wit = sig.serialize()
+            sigdata = sig.serialize()
             if sighash != SIGHASH.DEFAULT:
-                wit += bytes([sighash])
-            # TODO: maybe better to put into internal key sig field
-            inp.final_scriptwitness = Witness([wit])
+                sigdata += bytes([sighash])
+            inp.taproot_key_sig = sigdata
+            inp.final_scriptwitness = Witness([sigdata])
             # no need to sign anything else
             return 1
         counter = 0
@@ -977,22 +992,25 @@ class PSBT(EmbitBase):
                     continue
 
             # get all possible derivations with matching fingerprint
-            bip32_derivations = set()
+            bip32_derivations = OrderedDict()  # OrderedDict to keep order
             if fingerprint:
                 # if taproot derivations are present add them
                 for pub in inp.taproot_bip32_derivations:
                     (_leafs, derivation) = inp.taproot_bip32_derivations[pub]
                     if derivation.fingerprint == fingerprint:
-                        bip32_derivations.add((pub, derivation))
+                        # Add only if not already present
+                        if (pub, derivation) not in bip32_derivations:
+                            bip32_derivations[(pub, derivation)] = True
 
                 # segwit and legacy derivations
                 for pub in inp.bip32_derivations:
                     derivation = inp.bip32_derivations[pub]
                     if derivation.fingerprint == fingerprint:
-                        bip32_derivations.add((pub, derivation))
+                        if (pub, derivation) not in bip32_derivations:
+                            bip32_derivations[(pub, derivation)] = True
 
             # get derived keys for signing
-            derived_keypairs = set()  # (prv, pub)
+            derived_keypairs = OrderedDict()  # (prv, pub)
             for pub, derivation in bip32_derivations:
                 der = derivation.derivation
                 # descriptor key has origin derivation that we take into account
@@ -1008,7 +1026,9 @@ class PSBT(EmbitBase):
 
                 if hdkey.xonly() != pub.xonly():
                     raise PSBTError("Derivation path doesn't look right")
-                derived_keypairs.add((hdkey.key, pub))
+                # Insert into derived_keypairs if not present
+                if (hdkey.key, pub) not in derived_keypairs:
+                    derived_keypairs[(hdkey.key, pub)] = True
 
             # sign with taproot key
             if inp.is_taproot:
