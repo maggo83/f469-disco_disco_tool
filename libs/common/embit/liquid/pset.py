@@ -96,9 +96,11 @@ class LInputScope(InputScope):
             return
         # verify
         gen = secp256k1.generator_generate_blinded(asset, in_abf)
-        assert gen == secp256k1.generator_parse(self.utxo.asset)
+        if gen != secp256k1.generator_parse(self.utxo.asset):
+            raise PSBTError("Invalid asset commitment")
         cmt = secp256k1.pedersen_commit(vbf, value, gen)
-        assert cmt == secp256k1.pedersen_commitment_parse(self.utxo.value)
+        if cmt != secp256k1.pedersen_commitment_parse(self.utxo.value):
+            raise PSBTError("Invalid value commitment")
 
         self.asset = asset
         self.value = value
@@ -506,7 +508,8 @@ class PSET(PSBT):
             inp.unblind(blinding_key)
 
     def txseed(self, seed: bytes):
-        assert len(seed) == 32
+        if len(seed) != 32:
+            raise PSBTError("Seed should be 32 bytes")
         # get unique seed for this tx:
         # we use seed + txid:vout + scriptpubkey as unique data for tagged hash
         data = b"".join(
@@ -634,7 +637,7 @@ class PSET(PSBT):
     @property
     def blinded_tx(self):
         return self.TX_CLS(
-            version=self.tx_version or 2,
+            version=2 if self.tx_version is None else self.tx_version,
             locktime=self.locktime or 0,
             vin=[inp.blinded_vin for inp in self.inputs],
             vout=[out.blinded_vout for out in self.outputs],

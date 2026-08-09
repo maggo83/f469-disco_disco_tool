@@ -14,6 +14,7 @@ where SD card MCU can trick you to sign a wrong transactions.
 Makes sense to run gc.collect() after processing of each scope to free memory.
 """
 # TODO: refactor, a lot of code is duplicated here from transaction.py
+from collections import OrderedDict
 import hashlib
 from . import compact
 from . import ec
@@ -28,6 +29,11 @@ from .psbt import (
     read_string,
     ser_string,
     skip_string,
+    _GLOBAL_COUNT_FIELDS,
+    _GLOBAL_FIXED_VALUE_LENGTHS,
+    _GLOBAL_V2_FIELDS,
+    _validate_global_fields,
+    _validate_global_key,
 )
 from .transaction import (
     TransactionOutput,
@@ -36,6 +42,19 @@ from .transaction import (
     hash_amounts,
     hash_script_pubkeys,
 )
+
+
+def _read_global_value(stream, key):
+    value_len = compact.read_from(stream)
+    if key in _GLOBAL_FIXED_VALUE_LENGTHS:
+        if value_len != _GLOBAL_FIXED_VALUE_LENGTHS[key]:
+            raise PSBTError("Invalid global field length")
+    elif key in _GLOBAL_COUNT_FIELDS and value_len > 9:
+        raise PSBTError("Invalid global count length")
+    value = stream.read(value_len)
+    if len(value) != value_len:
+        raise PSBTError("Failed to read %d bytes" % value_len)
+    return value, len(compact.to_bytes(value_len)) + value_len
 
 
 def read_write(sin, sout, sz=None, chunk_size=32) -> int:
@@ -221,6 +240,7 @@ class PSBTView:
         num_inputs = None
         num_outputs = None
         tx_offset = None
+        global_fields = {}
         while True:
             # read key and update cursor
             key = read_string(stream)
@@ -228,19 +248,30 @@ class PSBTView:
             # separator
             if len(key) == 0:
                 break
-            if key in [b"\xfb", b"\x04", b"\x05"]:
-                value = read_string(stream)
-                cur += len(value) + len(compact.to_bytes(len(value)))
+            _validate_global_key(key)
+            if key == b"\xfb" or key in _GLOBAL_V2_FIELDS:
+                value, value_size = _read_global_value(stream, key)
+                cur += value_size
                 if key == b"\xfb":
+                    if version is not None:
+                        raise PSBTError("Duplicated global version")
+                    if len(value) != 4:
+                        raise PSBTError("Global version must be 4 bytes")
                     version = int.from_bytes(value, "little")
-                elif key == b"\x04":
-                    num_inputs = compact.from_bytes(value)
-                elif key == b"\x05":
-                    num_outputs = compact.from_bytes(value)
+                    if version not in [0, 2]:
+                        raise PSBTError("Unsupported PSBT version %d" % version)
+                else:
+                    if key in global_fields:
+                        raise PSBTError("Duplicated global field")
+                    global_fields[key] = value
             elif key == b"\x00":
                 # we found global transaction
-                assert version != 2
-                assert (num_inputs is None) and (num_outputs is None)
+                if tx_offset is not None:
+                    raise PSBTError("Duplicated global transaction")
+                if version == 2:
+                    raise PSBTError("Global transaction with version 2 PSBT")
+                if b"\x04" in global_fields or b"\x05" in global_fields:
+                    raise PSBTError("Invalid global transaction")
                 tx_len = compact.read_from(stream)
                 cur += len(compact.to_bytes(tx_len))
                 tx_offset = cur
@@ -253,6 +284,14 @@ class PSBTView:
             else:
                 cur += skip_string(stream)
         first_scope = cur
+        # the check inside the loop only fires if 0xfb was seen before 0x00,
+        # so repeat it here to stay independent of the global map key order
+        if tx_offset is not None and version == 2:
+            raise PSBTError("Global transaction with version 2 PSBT")
+        _validate_global_fields(version, tx_offset is not None, global_fields)
+        if tx_offset is None:
+            num_inputs = compact.from_bytes(global_fields[b"\x04"])
+            num_outputs = compact.from_bytes(global_fields[b"\x05"])
         if None in [version or tx_offset, num_inputs, num_outputs]:
             raise PSBTError("Missing something important in PSBT")
         return cls(
@@ -310,7 +349,9 @@ class PSBTView:
             raise PSBTError("Invalid input index")
         vin = self.tx.vin(i) if self.tx else None
         self.seek_to_scope(i)
-        return self.PSBTIN_CLS.read_from(self.stream, vin=vin, compress=compress)
+        return self.PSBTIN_CLS.read_from(
+            self.stream, vin=vin, compress=compress, version=self.version
+        )
 
     def output(self, i, compress=None):
         """Reads, parses and returns PSBT OutputScope #i"""
@@ -320,7 +361,9 @@ class PSBTView:
             raise PSBTError("Invalid output index")
         vout = self.tx.vout(i) if self.tx else None
         self.seek_to_scope(self.num_inputs + i)
-        return self.PSBTOUT_CLS.read_from(self.stream, vout=vout, compress=compress)
+        return self.PSBTOUT_CLS.read_from(
+            self.stream, vout=vout, compress=compress, version=self.version
+        )
 
     # compress is not used here, but may be used by subclasses (liquid)
     def vin(self, i, compress=None):
@@ -742,22 +785,25 @@ class PSBTView:
                 return 0
 
         # get all possible derivations with matching fingerprint
-        bip32_derivations = set()
+        bip32_derivations = OrderedDict()
         if fingerprint:
             # if taproot derivations are present add them
             for pub in inp.taproot_bip32_derivations:
                 (_leafs, derivation) = inp.taproot_bip32_derivations[pub]
                 if derivation.fingerprint == fingerprint:
-                    bip32_derivations.add((pub, derivation))
+                    # Add only if not already present
+                    if (pub, derivation) not in bip32_derivations:
+                        bip32_derivations[(pub, derivation)] = True
 
             # segwit and legacy derivations
             for pub in inp.bip32_derivations:
                 derivation = inp.bip32_derivations[pub]
                 if derivation.fingerprint == fingerprint:
-                    bip32_derivations.add((pub, derivation))
+                    if (pub, derivation) not in bip32_derivations:
+                        bip32_derivations[(pub, derivation)] = True
 
         # get derived keys for signing
-        derived_keypairs = set()  # (prv, pub)
+        derived_keypairs = OrderedDict()  # (prv, pub)
         for pub, derivation in bip32_derivations:
             der = derivation.derivation
             # descriptor key has origin derivation that we take into account
@@ -773,7 +819,9 @@ class PSBTView:
 
             if hdkey.xonly() != pub.xonly():
                 raise PSBTError("Derivation path doesn't look right")
-            derived_keypairs.add((hdkey.key, pub))
+            # Insert into derived_keypairs if not present
+            if (hdkey.key, pub) not in derived_keypairs:
+                derived_keypairs[(hdkey.key, pub)] = True
 
         counter = 0
         # sign with taproot key

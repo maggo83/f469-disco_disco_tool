@@ -22,6 +22,48 @@ class CompressMode:
     PARTIAL = 2
 
 
+_GLOBAL_V2_FIELDS = (b"\x02", b"\x03", b"\x04", b"\x05", b"\x06")
+_GLOBAL_SINGLETON_FIELDS = (b"\x00",) + _GLOBAL_V2_FIELDS + (b"\xfb",)
+_GLOBAL_FIXED_VALUE_LENGTHS = {
+    b"\x02": 4,
+    b"\x03": 4,
+    b"\x06": 1,
+    b"\xfb": 4,
+}
+_GLOBAL_COUNT_FIELDS = (b"\x04", b"\x05")
+
+
+def _validate_global_key(key):
+    if len(key) != 1 and key[:1] in _GLOBAL_SINGLETON_FIELDS:
+        raise PSBTError("Invalid global field key")
+
+
+def _validate_global_fields(version, has_tx, fields):
+    if version == 2:
+        if has_tx:
+            raise PSBTError("Global TX field is not allowed in PSBTv2")
+        for key in (b"\x02", b"\x04", b"\x05"):
+            if key not in fields:
+                raise PSBTError("Missing required PSBTv2 global field")
+    else:
+        if not has_tx:
+            raise PSBTError("Global TX field is required in PSBTv0")
+        if any(key in fields for key in _GLOBAL_V2_FIELDS):
+            raise PSBTError("PSBTv2 global field is not allowed in PSBTv0")
+
+    for key in _GLOBAL_FIXED_VALUE_LENGTHS:
+        if key in fields and len(fields[key]) != _GLOBAL_FIXED_VALUE_LENGTHS[key]:
+            raise PSBTError("Invalid global field length")
+    for key in _GLOBAL_COUNT_FIELDS:
+        if key in fields:
+            try:
+                count = compact.from_bytes(fields[key])
+            except (ValueError, RuntimeError):
+                count = None
+            if count is None or compact.to_bytes(count) != fields[key]:
+                raise PSBTError("Invalid global count")
+
+
 def ser_string(stream, s: bytes) -> int:
     return stream.write(compact.to_bytes(len(s))) + stream.write(s)
 
@@ -66,6 +108,8 @@ class DerivationPath(EmbitBase):
 
 
 class PSBTScope(EmbitBase):
+    V2_FIELDS = ()
+
     def __init__(self, unknown: dict = {}):
         self.unknown = unknown
         self.parse_unknowns()
@@ -89,10 +133,15 @@ class PSBTScope(EmbitBase):
             s.seek(0)
             self.read_value(s, k)
 
+    def _validate_key(self, key):
+        if len(key) != 1 and key[:1] in self.V2_FIELDS:
+            raise PSBTError("Invalid PSBTv2 field key")
+
     def read_value(self, stream, key, *args, **kwargs):
         # separator
         if len(key) == 0:
             return
+        self._validate_key(key)
         value = read_string(stream)
         if key in self.unknown:
             raise PSBTError("Duplicated key")
@@ -103,12 +152,15 @@ class PSBTScope(EmbitBase):
 
     @classmethod
     def read_from(cls, stream, *args, **kwargs):
+        version = kwargs.pop("version", None)
         res = cls({}, *args, **kwargs)
         while True:
             key = read_string(stream)
             # separator
             if len(key) == 0:
                 break
+            if version != 2 and key in res.V2_FIELDS:
+                raise PSBTError("PSBTv2 field is not allowed in PSBTv0")
             res.read_value(stream, key)
         return res
 
@@ -116,6 +168,7 @@ class PSBTScope(EmbitBase):
 class InputScope(PSBTScope):
     TX_CLS = Transaction
     TXOUT_CLS = TransactionOutput
+    V2_FIELDS = (b"\x0e", b"\x0f", b"\x10", b"\x11", b"\x12")
 
     def __init__(self, unknown: dict = {}, vin=None, compress=CompressMode.KEEP_ALL):
         self.compress = compress
@@ -142,6 +195,7 @@ class InputScope(PSBTScope):
         self.taproot_bip32_derivations = OrderedDict()
         self.taproot_internal_key = None
         self.taproot_merkle_root = None
+        self.taproot_key_sig = None
         self.taproot_sigs = OrderedDict()
         self.taproot_scripts = OrderedDict()
 
@@ -187,6 +241,7 @@ class InputScope(PSBTScope):
         self.taproot_bip32_derivations.update(other.taproot_bip32_derivations)
         self.taproot_internal_key = other.taproot_internal_key
         self.taproot_merkle_root = other.taproot_merkle_root or self.taproot_merkle_root
+        self.taproot_key_sig = other.taproot_key_sig or self.taproot_key_sig
         self.taproot_sigs.update(other.taproot_sigs)
         self.taproot_scripts.update(other.taproot_scripts)
         self.final_scriptsig = other.final_scriptsig or self.final_scriptsig
@@ -247,6 +302,7 @@ class InputScope(PSBTScope):
         # separator
         if len(k) == 0:
             return
+        self._validate_key(k)
         # non witness utxo, can be parsed and verified without too much memory
         if k[0] == 0x00:
             if len(k) != 1:
@@ -350,7 +406,15 @@ class InputScope(PSBTScope):
         elif k == b"\x10":
             self.sequence = int.from_bytes(v, "little")
 
-        # TODO: 0x13 - tap key signature
+        # PSBT_IN_TAP_KEY_SIG
+        elif k[0] == 0x13:
+            # read the taproot key sig
+            if len(k) != 1:
+                raise PSBTError("Invalid taproot key signature key")
+            if self.taproot_key_sig is not None:
+                raise PSBTError("Duplicated taproot key signature")
+            self.taproot_key_sig = v
+
         # PSBT_IN_TAP_SCRIPT_SIG
         elif k[0] == 0x14:
             if len(k) != 65:
@@ -434,6 +498,11 @@ class InputScope(PSBTScope):
                 r += ser_string(stream, b"\x10")
                 r += ser_string(stream, self.sequence.to_bytes(4, "little"))
 
+        # PSBT_IN_TAP_KEY_SIG
+        if self.taproot_key_sig is not None:
+            r += ser_string(stream, b"\x13")
+            r += ser_string(stream, self.taproot_key_sig)
+
         # PSBT_IN_TAP_SCRIPT_SIG
         for pub, leaf in self.taproot_sigs:
             r += ser_string(stream, b"\x14" + pub.xonly() + leaf)
@@ -476,6 +545,8 @@ class InputScope(PSBTScope):
 
 
 class OutputScope(PSBTScope):
+    V2_FIELDS = (b"\x03", b"\x04")
+
     def __init__(self, unknown: dict = {}, vout=None, compress=CompressMode.KEEP_ALL):
         self.compress = compress
         self.value = None
@@ -520,6 +591,7 @@ class OutputScope(PSBTScope):
         # separator
         if len(k) == 0:
             return
+        self._validate_key(k)
 
         v = read_string(stream)
 
@@ -649,7 +721,7 @@ class PSBT(EmbitBase):
     @property
     def tx(self):
         return self.TX_CLS(
-            version=self.tx_version or 2,
+            version=2 if self.tx_version is None else self.tx_version,
             locktime=self.locktime or 0,
             vin=[inp.vin for inp in self.inputs],
             vout=[out.vout for out in self.outputs],
@@ -703,9 +775,9 @@ class PSBT(EmbitBase):
             r += ser_string(stream, self.xpubs[xpub].serialize())
 
         if self.version == 2:
-            if self.tx_version is not None:
-                r += ser_string(stream, b"\x02")
-                r += ser_string(stream, self.tx_version.to_bytes(4, "little"))
+            tx_version = 2 if self.tx_version is None else self.tx_version
+            r += ser_string(stream, b"\x02")
+            r += ser_string(stream, tx_version.to_bytes(4, "little"))
             if self.locktime is not None:
                 r += ser_string(stream, b"\x03")
                 r += ser_string(stream, self.locktime.to_bytes(4, "little"))
@@ -768,6 +840,7 @@ class PSBT(EmbitBase):
             # separator
             if len(key) == 0:
                 break
+            _validate_global_key(key)
             value = read_string(stream)
             # tx
             if key == b"\x00":
@@ -778,24 +851,29 @@ class PSBT(EmbitBase):
                         "Failed to parse PSBT - duplicated transaction field"
                     )
             elif key == b"\xfb":
+                if version is not None:
+                    raise PSBTError("Duplicated global version")
+                if len(value) != 4:
+                    raise PSBTError("Global version must be 4 bytes")
                 version = int.from_bytes(value, "little")
+                if version not in [0, 2]:
+                    raise PSBTError("Unsupported PSBT version %d" % version)
             else:
                 if key in unknown:
                     raise PSBTError("Duplicated key")
                 unknown[key] = value
 
-        if tx and version == 2:
-            raise PSBTError("Global TX field is not allowed in PSBTv2")
+        _validate_global_fields(version, tx is not None, unknown)
         psbt = cls(tx, unknown, version=version)
         # input scopes
         for i, vin in enumerate(psbt.tx.vin):
             psbt.inputs[i] = cls.PSBTIN_CLS.read_from(
-                stream, compress=compress, vin=vin
+                stream, compress=compress, vin=vin, version=version
             )
         # output scopes
         for i, vout in enumerate(psbt.tx.vout):
             psbt.outputs[i] = cls.PSBTOUT_CLS.read_from(
-                stream, compress=compress, vout=vout
+                stream, compress=compress, vout=vout, version=version
             )
         return psbt
 
@@ -881,11 +959,11 @@ class PSBT(EmbitBase):
                 sighash=sighash,
             )
             sig = pk.schnorr_sign(h)
-            wit = sig.serialize()
+            sigdata = sig.serialize()
             if sighash != SIGHASH.DEFAULT:
-                wit += bytes([sighash])
-            # TODO: maybe better to put into internal key sig field
-            inp.final_scriptwitness = Witness([wit])
+                sigdata += bytes([sighash])
+            inp.taproot_key_sig = sigdata
+            inp.final_scriptwitness = Witness([sigdata])
             # no need to sign anything else
             return 1
         counter = 0
@@ -977,22 +1055,25 @@ class PSBT(EmbitBase):
                     continue
 
             # get all possible derivations with matching fingerprint
-            bip32_derivations = set()
+            bip32_derivations = OrderedDict()  # OrderedDict to keep order
             if fingerprint:
                 # if taproot derivations are present add them
                 for pub in inp.taproot_bip32_derivations:
                     (_leafs, derivation) = inp.taproot_bip32_derivations[pub]
                     if derivation.fingerprint == fingerprint:
-                        bip32_derivations.add((pub, derivation))
+                        # Add only if not already present
+                        if (pub, derivation) not in bip32_derivations:
+                            bip32_derivations[(pub, derivation)] = True
 
                 # segwit and legacy derivations
                 for pub in inp.bip32_derivations:
                     derivation = inp.bip32_derivations[pub]
                     if derivation.fingerprint == fingerprint:
-                        bip32_derivations.add((pub, derivation))
+                        if (pub, derivation) not in bip32_derivations:
+                            bip32_derivations[(pub, derivation)] = True
 
             # get derived keys for signing
-            derived_keypairs = set()  # (prv, pub)
+            derived_keypairs = OrderedDict()  # (prv, pub)
             for pub, derivation in bip32_derivations:
                 der = derivation.derivation
                 # descriptor key has origin derivation that we take into account
@@ -1008,7 +1089,9 @@ class PSBT(EmbitBase):
 
                 if hdkey.xonly() != pub.xonly():
                     raise PSBTError("Derivation path doesn't look right")
-                derived_keypairs.add((hdkey.key, pub))
+                # Insert into derived_keypairs if not present
+                if (hdkey.key, pub) not in derived_keypairs:
+                    derived_keypairs[(hdkey.key, pub)] = True
 
             # sign with taproot key
             if inp.is_taproot:
