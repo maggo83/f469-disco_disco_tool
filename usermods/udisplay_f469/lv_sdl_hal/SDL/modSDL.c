@@ -476,7 +476,7 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_sdl_set_resizable_obj, mp_sdl_set_resizable)
  * Uses SDL_RenderReadPixels to capture, writes RGB565 data to file.
  * This avoids MicroPython heap allocation for large buffers.
  *
- * @param filename Path to write the raw RGB565 data
+ * @param filename Path to write the raw RGB565 data (host byte order)
  * @return tuple(width, height, filename) or raises RuntimeError on failure.
  */
 STATIC mp_obj_t mp_sdl_screenshot(mp_obj_t filename_obj) {
@@ -504,50 +504,23 @@ STATIC mp_obj_t mp_sdl_screenshot(mp_obj_t filename_obj) {
     mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("cannot open file"));
   }
 
-  /* Process in row chunks to minimize memory usage */
-  int32_t chunk_rows = 32;  /* Process 32 rows at a time */
-  size_t rgba_chunk_size = (size_t)w * chunk_rows * 4;
-  size_t rgb565_chunk_size = (size_t)w * chunk_rows * 2;
-
-  uint8_t *rgba_buf = (uint8_t *)malloc(rgba_chunk_size);
-  uint8_t *rgb565_buf = (uint8_t *)malloc(rgb565_chunk_size);
-
-  if (!rgba_buf || !rgb565_buf) {
-    if (rgba_buf) free(rgba_buf);
-    if (rgb565_buf) free(rgb565_buf);
+  size_t pitch = (size_t)w * 2;
+  uint8_t *buf = (uint8_t *)malloc(pitch * h);
+  if (!buf) {
     fclose(f);
-    mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("malloc chunk failed"));
+    mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("malloc failed"));
   }
 
-  /* Process screen in chunks */
-  for (int32_t y = 0; y < h; y += chunk_rows) {
-    int32_t rows = (y + chunk_rows > h) ? (h - y) : chunk_rows;
-    SDL_Rect rect = {0, y, w, rows};
-
-    if (SDL_RenderReadPixels(renderer, &rect, SDL_PIXELFORMAT_RGBA8888,
-                             rgba_buf, w * 4) != 0) {
-      free(rgba_buf);
-      free(rgb565_buf);
-      fclose(f);
-      mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("SDL_RenderReadPixels failed"));
-    }
-
-    /* Convert RGBA8888 to RGB565 */
-    for (int32_t i = 0; i < w * rows; i++) {
-      uint8_t r = rgba_buf[i * 4 + 0];
-      uint8_t g = rgba_buf[i * 4 + 1];
-      uint8_t b = rgba_buf[i * 4 + 2];
-      uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-      rgb565_buf[i * 2 + 0] = rgb565 & 0xFF;
-      rgb565_buf[i * 2 + 1] = (rgb565 >> 8) & 0xFF;
-    }
-
-    /* Write chunk to file */
-    fwrite(rgb565_buf, 1, w * rows * 2, f);
+  /* Explicit rect: a zoomed window's render target is larger than the display. */
+  SDL_Rect rect = {0, 0, w, h};
+  if (SDL_RenderReadPixels(renderer, &rect, SDL_PIXELFORMAT_RGB565, buf, (int)pitch) != 0) {
+    free(buf);
+    fclose(f);
+    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("SDL_RenderReadPixels failed"));
   }
 
-  free(rgba_buf);
-  free(rgb565_buf);
+  fwrite(buf, 1, pitch * h, f);
+  free(buf);
   fclose(f);
 
   /* Return tuple (width, height, filename) */
