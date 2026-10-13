@@ -149,6 +149,13 @@ uint8_t BSP_SDRAM_Init(void)
 {
   static uint8_t sdramstatus = SDRAM_ERROR;
 
+  /* Initialize only once: boot code and BSP_LCD_Init() both call this, and
+   * a second initialization must not disturb data already kept in SDRAM. */
+  if(sdramstatus == SDRAM_OK)
+  {
+    return SDRAM_OK;
+  }
+
   /* SDRAM device configuration */
   sdramHandle.Instance = FMC_SDRAM_DEVICE;
 

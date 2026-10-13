@@ -2,6 +2,8 @@ DISPLAY_MOD_DIR := $(USERMOD_DIR)
 
 # stm32f469
 ifeq ($(CMSIS_MCU),STM32F469xx)
+# SDRAM regions (sdram_layout.h)
+CFLAGS_USERMOD += -I$(DISPLAY_MOD_DIR)/../sdram
 # The module itself
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/display.c
 

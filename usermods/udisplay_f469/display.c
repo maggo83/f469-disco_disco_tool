@@ -5,6 +5,7 @@
 #include "lvgl.h"
 #include "lv_stm_hal.h"
 #include "stm32469i_discovery_lcd.h"
+#include "sdram_layout.h"
 
 #if MODULE_DISPLAY_ENABLED
 
@@ -48,7 +49,7 @@ STATIC mp_obj_t display_set_rotation(mp_obj_t rot_obj){
         rot = LCD_ORIENTATION_LANDSCAPE;
     }
     BSP_LCD_InitEx(rot, 0);
-    BSP_LCD_LayerDefaultInit(LTDC_ACTIVE_LAYER_BACKGROUND, LCD_FB_START_ADDRESS);
+    BSP_LCD_LayerDefaultInit(LTDC_ACTIVE_LAYER_BACKGROUND, SDRAM_FB0_ADDR);
     BSP_LCD_SelectLayer(LTDC_ACTIVE_LAYER_BACKGROUND);
     BSP_LCD_Clear(0xFFFFFFFF);
     BSP_LCD_SetBackColor(0xFFFFFFFF);

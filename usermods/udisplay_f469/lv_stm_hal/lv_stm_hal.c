@@ -4,12 +4,13 @@
 #include "lvgl/src/indev/lv_indev.h"
 #include "stm32469i_discovery_lcd.h"
 #include "stm32469i_discovery_ts.h"
+#include "sdram_layout.h"
 
 static void tft_flush(lv_display_t * disp, const lv_area_t * area, uint8_t * px_map);
 
 void tft_init(void) {
     BSP_LCD_Init();
-    BSP_LCD_LayerDefaultInit(LTDC_ACTIVE_LAYER_BACKGROUND, LCD_FB_START_ADDRESS);
+    BSP_LCD_LayerDefaultInit(LTDC_ACTIVE_LAYER_BACKGROUND, SDRAM_FB0_ADDR);
     BSP_LCD_SelectLayer(LTDC_ACTIVE_LAYER_BACKGROUND);
     BSP_LCD_Clear(0xFFFFFFFF);
     BSP_LCD_SetBackColor(0xFFFFFFFF);

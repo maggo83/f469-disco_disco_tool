@@ -1,6 +1,6 @@
 # SDRAM as block device
 
-For temporary storage. Pretty large - 16 Mb minus 2x display framebuffers.
+For temporary storage: the RAM disk region of `sdram_layout.h`, which assigns all SDRAM regions.
 
 Usage:
 
