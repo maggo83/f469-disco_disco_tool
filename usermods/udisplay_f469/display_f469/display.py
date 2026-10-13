@@ -1,4 +1,14 @@
 from udisplay import update, on, off, set_rotation
+# Hardware transitions; boards without them do not define these names.
+from udisplay import (
+    transition,
+    transition_active,
+    EASING_LINEAR,
+    EASING_EASE_IN_CUBIC,
+    EASING_EASE_OUT_CUBIC,
+    EASING_EASE_IN_OUT_CUBIC,
+    EASING_EASE_OUT_QUINT,
+)
 
 def init(autoupdate=True):
     import udisplay
