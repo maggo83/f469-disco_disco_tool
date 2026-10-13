@@ -6,10 +6,14 @@
 #include "lv_stm_hal.h"
 #include "stm32469i_discovery_lcd.h"
 #include "sdram_layout.h"
+#include "stm32469i_discovery_sdram.h"
 
 #if MODULE_DISPLAY_ENABLED
 
 STATIC mp_obj_t display_init(){
+    /* LVGL's memory pool is in SDRAM. boot.py initializes SDRAM, but safe
+     * mode skips boot.py; a second call returns at once. */
+    BSP_SDRAM_Init();
     lv_init();
     tft_init();
     touchpad_init();

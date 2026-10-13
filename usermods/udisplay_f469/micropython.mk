@@ -4,6 +4,14 @@ DISPLAY_MOD_DIR := $(USERMOD_DIR)
 ifeq ($(CMSIS_MCU),STM32F469xx)
 # SDRAM regions (sdram_layout.h)
 CFLAGS_USERMOD += -I$(DISPLAY_MOD_DIR)/../sdram
+# LVGL allocates from a pool in SDRAM; lv_gc_pool.c makes the garbage
+# collector trace it by taking over the port's call of gc_collect_end().
+CFLAGS_USERMOD += -DUDISPLAY_LVGL_POOL_IN_SDRAM
+LDFLAGS_USERMOD += -Wl,--wrap=gc_collect_end
+ifeq ($(LTO),1)
+$(error LTO can bypass -Wl,--wrap=gc_collect_end, and the garbage collector would then free objects LVGL still references)
+endif
+SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_gc_pool.c
 # The module itself
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/display.c
 
