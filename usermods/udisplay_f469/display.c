@@ -11,11 +11,13 @@
 
 #if MODULE_DISPLAY_ENABLED
 
-/* Python callable to run when a transition finishes. The caller must keep
- * a reference to it until it runs. */
-STATIC mp_obj_t s_transition_done_cb = mp_const_none;
+/* The Python callable to run when a transition finishes is kept in the
+ * root pointer udisplay_transition_done_cb (registered below the lv_mpy.c
+ * include), so the garbage collector keeps it alive until it runs. */
+#define TRANSITION_DONE_CB MP_STATE_VM(udisplay_transition_done_cb)
 
 STATIC mp_obj_t display_init(){
+    TRANSITION_DONE_CB = mp_const_none;
     lv_init();
     tft_init();
     touchpad_init();
@@ -69,9 +71,9 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_1(display_set_rotation_obj, display_set_rotation)
  * run Python code inside an ISR context. */
 STATIC void transition_done_trampoline(void *arg) {
     (void)arg;
-    mp_obj_t cb = s_transition_done_cb;
+    mp_obj_t cb = TRANSITION_DONE_CB;
     if (cb != mp_const_none) {
-        s_transition_done_cb = mp_const_none;
+        TRANSITION_DONE_CB = mp_const_none;
         mp_sched_schedule(cb, mp_const_none);
     }
 }
@@ -96,14 +98,14 @@ STATIC mp_obj_t display_transition(size_t n_args, const mp_obj_t *args) {
     if (tft_transition_active()) {
         mp_raise_OSError(MP_EBUSY);
     }
-    s_transition_done_cb = cb;
+    TRANSITION_DONE_CB = cb;
     int rc = tft_transition_start(anim_type, dur_ms,
                                   (uint16_t)rx, (uint16_t)ry,
                                   (uint16_t)rw, (uint16_t)rh,
                                   (uint8_t)easing,
                                   transition_done_trampoline, NULL);
     if (rc != 0) {
-        s_transition_done_cb = mp_const_none;
+        TRANSITION_DONE_CB = mp_const_none;
         mp_raise_ValueError(MP_ERROR_TEXT("transition rejected"));
     }
     return mp_const_none;
@@ -128,6 +130,8 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_0(display_transition_active_obj, display_transiti
  * the include) ensures the qstr extractor records it. */
 
 #include "lv_mpy.c"
+
+MP_REGISTER_ROOT_POINTER(mp_obj_t udisplay_transition_done_cb);
 
 STATIC const mp_rom_map_elem_t display_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_display) },
