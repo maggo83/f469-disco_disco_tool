@@ -22,6 +22,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
 
 #include <SDL2/SDL.h>
 
@@ -469,6 +470,127 @@ STATIC mp_obj_t mp_sdl_set_resizable(mp_obj_t val_in) {
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_sdl_set_resizable_obj, mp_sdl_set_resizable);
 /* clang-format on */
 
+typedef struct {
+  uint16_t *pixels;
+  int32_t width;
+  int32_t height;
+  bool ok;
+} screenshot_capture_t;
+
+STATIC void screenshot_capture_cb(lv_event_t *event) {
+  screenshot_capture_t *capture = lv_event_get_user_data(event);
+  if (!lv_display_flush_is_last(s_disp)) {
+    return;
+  }
+
+  lv_draw_buf_t *draw_buf = lv_display_get_buf_active(s_disp);
+  if (!draw_buf || !draw_buf->data ||
+      (draw_buf->header.cf != LV_COLOR_FORMAT_XRGB8888 &&
+       draw_buf->header.cf != LV_COLOR_FORMAT_ARGB8888) ||
+      draw_buf->header.w < capture->width ||
+      draw_buf->header.h < capture->height ||
+      draw_buf->header.stride < (uint32_t)capture->width * sizeof(lv_color32_t) ||
+      draw_buf->data_size < (size_t)draw_buf->header.stride * capture->height) {
+    return;
+  }
+
+  for (int32_t y = 0; y < capture->height; y++) {
+    const lv_color32_t *src =
+        (const lv_color32_t *)(draw_buf->data + y * draw_buf->header.stride);
+    uint16_t *dst = capture->pixels + y * capture->width;
+    for (int32_t x = 0; x < capture->width; x++) {
+      dst[x] = ((uint16_t)(src[x].red & 0xf8) << 8) |
+               ((uint16_t)(src[x].green & 0xfc) << 3) |
+               (src[x].blue >> 3);
+    }
+  }
+  capture->ok = true;
+}
+
+/**
+ * @brief Take a screenshot and write directly to file (bypasses Python heap).
+ *
+ * Captures LVGL's logical framebuffer during a forced refresh, before SDL
+ * presents and scales it. Writes RGB565 data without using the MicroPython
+ * heap.
+ *
+ * @param filename Path to write the raw RGB565 data (host byte order)
+ * @return tuple(width, height, filename) or raises RuntimeError on failure.
+ */
+STATIC mp_obj_t mp_sdl_screenshot(mp_obj_t filename_obj) {
+  if (!s_disp) {
+    mp_raise_ValueError(MP_ERROR_TEXT("init() first"));
+  }
+
+  const char *filename = mp_obj_str_get_str(filename_obj);
+
+  int32_t w = lv_display_get_horizontal_resolution(s_disp);
+  int32_t h = lv_display_get_vertical_resolution(s_disp);
+
+  if (w <= 0 || h <= 0 || w > 8192 || h > 8192) {
+    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("bad dimensions"));
+  }
+
+  size_t pitch = (size_t)w * 2;
+  size_t output_size = pitch * h;
+  uint16_t *buf = (uint16_t *)malloc(output_size);
+  if (!buf) {
+    mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("malloc failed"));
+  }
+
+  screenshot_capture_t capture = {
+      .pixels = buf,
+      .width = w,
+      .height = h,
+      .ok = false,
+  };
+
+  nlr_buf_t nlr;
+  if (nlr_push(&nlr) == 0) {
+    lv_display_add_event_cb(s_disp, screenshot_capture_cb, LV_EVENT_FLUSH_START,
+                            &capture);
+    lv_obj_invalidate(lv_display_get_screen_active(s_disp));
+    lv_refr_now(s_disp);
+    lv_display_remove_event_cb_with_user_data(s_disp, screenshot_capture_cb,
+                                               &capture);
+    nlr_pop();
+  } else {
+    lv_display_remove_event_cb_with_user_data(s_disp, screenshot_capture_cb,
+                                               &capture);
+    free(buf);
+    nlr_jump(nlr.ret_val);
+  }
+
+  if (!capture.ok) {
+    free(buf);
+    mp_raise_msg(&mp_type_RuntimeError,
+                 MP_ERROR_TEXT("cannot capture framebuffer"));
+  }
+
+  FILE *f = fopen(filename, "wb");
+  if (!f) {
+    free(buf);
+    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("cannot open file"));
+  }
+
+  size_t bytes_written = fwrite(buf, 1, output_size, f);
+  free(buf);
+  int close_result = fclose(f);
+  if (bytes_written != output_size || close_result != 0) {
+    remove(filename);
+    mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("cannot write file"));
+  }
+
+  /* Return tuple (width, height, filename) */
+  mp_obj_t tuple[3] = {
+    mp_obj_new_int(w),
+    mp_obj_new_int(h),
+    filename_obj
+  };
+  return mp_obj_new_tuple(3, tuple);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_1(mp_sdl_screenshot_obj, mp_sdl_screenshot);
+
 /* -------------------------------------------------------------------------- */
 /*                               Module table */
 /* -------------------------------------------------------------------------- */
@@ -483,6 +605,7 @@ STATIC const mp_rom_map_elem_t sdl_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_set_zoom),            MP_ROM_PTR(&mp_sdl_set_zoom_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_title),           MP_ROM_PTR(&mp_sdl_set_title_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_resizable),       MP_ROM_PTR(&mp_sdl_set_resizable_obj) },
+    { MP_ROM_QSTR(MP_QSTR_screenshot),          MP_ROM_PTR(&mp_sdl_screenshot_obj) },
 };
 /* clang-format on */
 
