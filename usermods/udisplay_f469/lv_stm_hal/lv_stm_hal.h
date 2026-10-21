@@ -7,6 +7,7 @@ extern "C" {
 
 void tft_init();
 void touchpad_init();
+void tft_poll(void);
 
 #ifdef __cplusplus
 }

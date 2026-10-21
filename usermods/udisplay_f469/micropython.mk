@@ -2,6 +2,9 @@ DISPLAY_MOD_DIR := $(USERMOD_DIR)
 
 # stm32f469
 ifeq ($(CMSIS_MCU),STM32F469xx)
+UDISPLAY_F469_ASYNC_DMA2D ?= 0
+CFLAGS_USERMOD += -DUDISPLAY_F469_ASYNC_DMA2D=$(UDISPLAY_F469_ASYNC_DMA2D)
+
 # The module itself
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/display.c
 
@@ -37,7 +40,11 @@ SRC_USERMOD += $(CSRCS)
 CFLAGS_USERMOD += $(CFLAGS)
 
 # display driver
+ifeq ($(UDISPLAY_F469_ASYNC_DMA2D),1)
+SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/lv_stm_hal_async.c
+else
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/lv_stm_hal.c
+endif
 # square font
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/fonts/square.c
 # roboto mono font

@@ -20,6 +20,9 @@ STATIC mp_obj_t display_update(mp_obj_t dt_obj){
     uint32_t dt = mp_obj_get_int(dt_obj);
     lv_tick_inc(dt);
     lv_task_handler();
+#if UDISPLAY_F469_ASYNC_DMA2D
+    tft_poll();
+#endif
     return mp_const_none;
 }
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(display_update_obj, display_update);
