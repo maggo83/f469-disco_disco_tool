@@ -149,6 +149,15 @@ uint8_t BSP_SDRAM_Init(void)
 {
   static uint8_t sdramstatus = SDRAM_ERROR;
 
+#if F469_SDRAM_LAYOUT
+  /* The configured layout may already contain the LVGL pool or framebuffer
+   * data when another subsystem initializes the display. */
+  if(sdramstatus == SDRAM_OK)
+  {
+    return SDRAM_OK;
+  }
+#endif
+
   /* SDRAM device configuration */
   sdramHandle.Instance = FMC_SDRAM_DEVICE;
 
