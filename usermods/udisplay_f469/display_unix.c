@@ -31,6 +31,11 @@ STATIC mp_obj_t display_set_rotation(mp_obj_t rot_obj){
 
 STATIC MP_DEFINE_CONST_FUN_OBJ_1(display_set_rotation_obj, display_set_rotation);
 
+STATIC mp_obj_t display_clear_framebuffers(void){
+    return mp_const_none;
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(display_clear_framebuffers_obj,
+                                 display_clear_framebuffers);
 
 STATIC const mp_rom_map_elem_t display_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_display) },
@@ -38,6 +43,7 @@ STATIC const mp_rom_map_elem_t display_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_on), MP_ROM_PTR(&display_on_obj) },
     { MP_ROM_QSTR(MP_QSTR_off), MP_ROM_PTR(&display_off_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_rotation), MP_ROM_PTR(&display_set_rotation_obj) },
+    { MP_ROM_QSTR(MP_QSTR_clear_framebuffers), MP_ROM_PTR(&display_clear_framebuffers_obj) },
 };
 STATIC MP_DEFINE_CONST_DICT(display_module_globals, display_module_globals_table);
 

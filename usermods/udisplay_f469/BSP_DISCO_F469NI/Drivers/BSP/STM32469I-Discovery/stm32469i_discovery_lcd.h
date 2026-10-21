@@ -357,6 +357,20 @@ uint8_t  BSP_LCD_DrawBitmapRaw_IT_To(uint32_t FbBase,
                                      uint32_t ColorBits, const void *pPixelData,
                                      uint32_t SrcPitchPx);
 
+/* Non-blocking DMA2D copy of a rectangle between two ARGB8888 framebuffers
+ * with the screen width as stride. Source and destination positions may
+ * differ, as the transition compositor reads pixels from a shifted
+ * position in the previous frame. */
+uint8_t  BSP_LCD_CopyRectEx_IT(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                               uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                               uint32_t Width, uint32_t Height);
+
+/* Blocking variant of BSP_LCD_CopyRectEx_IT, used before a transition
+ * starts. */
+uint8_t  BSP_LCD_CopyRectEx(uint32_t SrcFb, uint32_t SrcX, uint32_t SrcY,
+                            uint32_t DstFb, uint32_t DstX, uint32_t DstY,
+                            uint32_t Width, uint32_t Height);
+
 void     BSP_LCD_FillRect(uint16_t Xpos, uint16_t Ypos, uint16_t Width, uint16_t Height);
 void     BSP_LCD_FillCircle(uint16_t Xpos, uint16_t Ypos, uint16_t Radius);
 void     BSP_LCD_FillPolygon(pPoint Points, uint16_t PointCount);
