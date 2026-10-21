@@ -5,10 +5,17 @@
 #include "lvgl.h"
 #include "lv_stm_hal.h"
 #include "stm32469i_discovery_lcd.h"
+#if UDISPLAY_LVGL_POOL_IN_SDRAM
+#include "stm32469i_discovery_sdram.h"
+#endif
 
 #if MODULE_DISPLAY_ENABLED
 
 STATIC mp_obj_t display_init(){
+#if UDISPLAY_LVGL_POOL_IN_SDRAM
+    /* The external pool requires SDRAM even when boot.py was skipped. */
+    BSP_SDRAM_Init();
+#endif
     lv_init();
     tft_init();
     touchpad_init();

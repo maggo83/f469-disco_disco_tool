@@ -2,6 +2,23 @@ DISPLAY_MOD_DIR := $(USERMOD_DIR)
 
 # stm32f469
 ifeq ($(CMSIS_MCU),STM32F469xx)
+UDISPLAY_LVGL_POOL_IN_SDRAM ?= 0
+F469_SDRAM_LAYOUT ?= 0
+
+CFLAGS_USERMOD += -DUDISPLAY_LVGL_POOL_IN_SDRAM=$(UDISPLAY_LVGL_POOL_IN_SDRAM)
+CFLAGS_USERMOD += -DF469_SDRAM_LAYOUT=$(F469_SDRAM_LAYOUT)
+
+ifeq ($(UDISPLAY_LVGL_POOL_IN_SDRAM),1)
+ifneq ($(F469_SDRAM_LAYOUT),1)
+$(error UDISPLAY_LVGL_POOL_IN_SDRAM=1 requires F469_SDRAM_LAYOUT=1)
+endif
+LDFLAGS_USERMOD += -Wl,--wrap=gc_collect_end
+ifeq ($(LTO),1)
+$(error LTO can bypass -Wl,--wrap=gc_collect_end, and the garbage collector would then free objects LVGL still references)
+endif
+SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_gc_pool.c
+endif
+
 # The module itself
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/display.c
 

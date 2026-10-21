@@ -48,7 +48,14 @@
  * - LV_STDLIB_RTTHREAD:    RT-Thread implementation
  * - LV_STDLIB_CUSTOM:      Implement the functions externally
  */
+/* On the F469 (micropython.mk defines UDISPLAY_LVGL_POOL_IN_SDRAM) LVGL
+ * allocates from its own pool in SDRAM instead of the MicroPython heap, and
+ * lv_gc_pool.c lets the garbage collector trace that pool. */
+#if UDISPLAY_LVGL_POOL_IN_SDRAM
+#define LV_USE_STDLIB_MALLOC    LV_STDLIB_BUILTIN
+#else
 #define LV_USE_STDLIB_MALLOC    LV_STDLIB_MICROPYTHON
+#endif
 #define LV_USE_STDLIB_STRING    LV_STDLIB_BUILTIN
 #define LV_USE_STDLIB_SPRINTF   LV_STDLIB_BUILTIN
 
@@ -59,21 +66,22 @@
 #define LV_LIMITS_INCLUDE       <limits.h>
 #define LV_STDARG_INCLUDE       <stdarg.h>
 
-#if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
+#if UDISPLAY_LVGL_POOL_IN_SDRAM
+    #include "sdram_layout.h"
     /*Size of the memory available for `lv_malloc()` in bytes (>= 2kB)*/
-    #define LV_MEM_SIZE (64 * 1024U)          /*[bytes]*/
+    #define LV_MEM_SIZE SDRAM_LVGL_POOL_SIZE  /*[bytes]*/
 
     /*Size of the memory expand for `lv_malloc()` in bytes*/
     #define LV_MEM_POOL_EXPAND_SIZE 0
 
     /*Set an address for the memory pool instead of allocating it as a normal array. Can be in external SRAM too.*/
-    #define LV_MEM_ADR 0     /*0: unused*/
+    #define LV_MEM_ADR SDRAM_LVGL_POOL_ADDR     /*0: unused*/
     /*Instead of an address give a memory allocator that will be called to get a memory pool for LVGL. E.g. my_malloc*/
     #if LV_MEM_ADR == 0
         #undef LV_MEM_POOL_INCLUDE
         #undef LV_MEM_POOL_ALLOC
     #endif
-#endif  /*LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN*/
+#endif  /*UDISPLAY_LVGL_POOL_IN_SDRAM*/
 
 /*====================
    HAL SETTINGS
