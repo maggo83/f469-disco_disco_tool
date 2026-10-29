@@ -2,25 +2,56 @@ DISPLAY_MOD_DIR := $(USERMOD_DIR)
 
 # stm32f469
 ifeq ($(CMSIS_MCU),STM32F469xx)
+UDISPLAY_F469_COMPOSITOR ?= 0
 UDISPLAY_F469_ASYNC_DMA2D ?= 0
+UDISPLAY_F469_RGB565 ?= 0
 UDISPLAY_LVGL_POOL_IN_SDRAM ?= 0
 F469_SDRAM_LAYOUT ?= 0
 
+CFLAGS_USERMOD += -DUDISPLAY_F469_COMPOSITOR=$(UDISPLAY_F469_COMPOSITOR)
 CFLAGS_USERMOD += -DUDISPLAY_F469_ASYNC_DMA2D=$(UDISPLAY_F469_ASYNC_DMA2D)
+CFLAGS_USERMOD += -DUDISPLAY_F469_RGB565=$(UDISPLAY_F469_RGB565)
 CFLAGS_USERMOD += -DUDISPLAY_LVGL_POOL_IN_SDRAM=$(UDISPLAY_LVGL_POOL_IN_SDRAM)
 CFLAGS_USERMOD += -DF469_SDRAM_LAYOUT=$(F469_SDRAM_LAYOUT)
 
-ifeq ($(UDISPLAY_LVGL_POOL_IN_SDRAM),1)
-ifneq ($(F469_SDRAM_LAYOUT),1)
-$(error UDISPLAY_LVGL_POOL_IN_SDRAM=1 requires F469_SDRAM_LAYOUT=1)
+ifeq ($(UDISPLAY_F469_COMPOSITOR),1)
+ifneq ($(UDISPLAY_F469_ASYNC_DMA2D),1)
+$(error UDISPLAY_F469_COMPOSITOR=1 requires UDISPLAY_F469_ASYNC_DMA2D=1)
 endif
+ifneq ($(UDISPLAY_F469_RGB565),1)
+$(error UDISPLAY_F469_COMPOSITOR=1 requires UDISPLAY_F469_RGB565=1)
+endif
+endif
+ifeq ($(UDISPLAY_F469_RGB565),1)
+ifneq ($(UDISPLAY_F469_COMPOSITOR),1)
+$(error UDISPLAY_F469_RGB565=1 requires UDISPLAY_F469_COMPOSITOR=1)
+endif
+endif
+
+ifneq ($(filter 1,$(UDISPLAY_F469_COMPOSITOR) $(UDISPLAY_LVGL_POOL_IN_SDRAM)),)
+ifneq ($(F469_SDRAM_LAYOUT),1)
+$(error F469_SDRAM_LAYOUT=1 is required by the compositor and SDRAM LVGL pool)
+endif
+endif
+
+ifeq ($(UDISPLAY_F469_COMPOSITOR),1)
+SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/lv_stm_hal_compositor.c
+SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/transition_math.c
+else ifeq ($(UDISPLAY_F469_ASYNC_DMA2D),1)
+SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/lv_stm_hal_async.c
+else
+SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/lv_stm_hal.c
+endif
+
+# LVGL allocates from a pool in SDRAM; lv_gc_pool.c makes the garbage
+# collector trace it by taking over the port's call of gc_collect_end().
+ifeq ($(UDISPLAY_LVGL_POOL_IN_SDRAM),1)
 LDFLAGS_USERMOD += -Wl,--wrap=gc_collect_end
 ifeq ($(LTO),1)
 $(error LTO can bypass -Wl,--wrap=gc_collect_end, and the garbage collector would then free objects LVGL still references)
 endif
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_gc_pool.c
 endif
-
 # The module itself
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/display.c
 
@@ -55,12 +86,6 @@ include $(LVGL_DIR)/lvgl/lvgl.mk
 SRC_USERMOD += $(CSRCS)
 CFLAGS_USERMOD += $(CFLAGS)
 
-# display driver
-ifeq ($(UDISPLAY_F469_ASYNC_DMA2D),1)
-SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/lv_stm_hal_async.c
-else
-SRC_USERMOD += $(DISPLAY_MOD_DIR)/lv_stm_hal/lv_stm_hal.c
-endif
 # square font
 SRC_USERMOD += $(DISPLAY_MOD_DIR)/fonts/square.c
 # roboto mono font
