@@ -200,7 +200,10 @@ STATIC MP_DEFINE_CONST_FUN_OBJ_0(display_transition_active_obj, display_transiti
  * Keeping every new MP_QSTR_xxx usage in the final chunk (i.e. below
  * the include) ensures the qstr extractor records it. */
 
-#include "lv_mpy.c"
+#ifndef UDISPLAY_LV_MPY
+#define UDISPLAY_LV_MPY "lv_mpy.c"
+#endif
+#include UDISPLAY_LV_MPY
 
 #if UDISPLAY_F469_COMPOSITOR
 MP_REGISTER_ROOT_POINTER(mp_obj_t udisplay_transition_done_cb);

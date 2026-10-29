@@ -4,11 +4,14 @@
 # 🛠️  generate-bindings.sh
 # Generates MicroPython bindings for udisplay_f469 using lv_binding_micropython
 #
-# Run from: usermods/udisplay_f469
 ################################################################################
 
 set -e
 set -o pipefail
+
+CALLER_DIR="$PWD"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
 # Repository URL
 LV_BINDING_REPO_URL="https://github.com/lvgl/lv_binding_micropython.git"
@@ -20,6 +23,18 @@ TMP_DIR="tmp_binding_gen"
 LVGL_INCLUDE="../../lvgl"
 LVGL_HEADER="$LVGL_INCLUDE/lvgl.h"
 FAKE_LIBC_INCLUDE="pycparser/utils/fake_libc_include"
+LV_MPY_OUTPUT="${LV_MPY_OUTPUT:-$SCRIPT_DIR/lv_mpy.c}"
+if [[ "$LV_MPY_OUTPUT" != /* ]]; then
+    LV_MPY_OUTPUT="$CALLER_DIR/$LV_MPY_OUTPUT"
+fi
+GEN_DEFINES=()
+if [[ -n "${LV_CONF_OVERRIDE:-}" ]]; then
+    if [[ "$LV_CONF_OVERRIDE" != /* ]]; then
+        LV_CONF_OVERRIDE="$CALLER_DIR/$LV_CONF_OVERRIDE"
+    fi
+    LV_CONF_OVERRIDE="$(cd "$(dirname "$LV_CONF_OVERRIDE")" && pwd)/$(basename "$LV_CONF_OVERRIDE")"
+    GEN_DEFINES=(-D "UDISPLAY_LV_CONF_OVERRIDE=\"$LV_CONF_OVERRIDE\"")
+fi
 
 # Colors
 GREEN='\033[0;32m'
@@ -67,12 +82,16 @@ python gen/gen_mpy.py \
   -MP lv \
   -I$LVGL_INCLUDE \
   -I$FAKE_LIBC_INCLUDE \
+  "${GEN_DEFINES[@]}" \
   $LVGL_HEADER \
   $CUSTOM_HEADER > tmp_bindings.c
 
-# Fix include paths in generated file
-sed -e 's|#include "../../lvgl/|#include "lvgl/|g' \
-    tmp_bindings.c > ../../lv_mpy.c
+# Fix include paths and remove machine-specific paths from generated comments.
+sed_args=(-e 's|#include "../../lvgl/|#include "lvgl/|g')
+if [[ -n "${LV_CONF_OVERRIDE:-}" ]]; then
+    sed_args+=(-e "s|$LV_CONF_OVERRIDE|<LV_CONF_OVERRIDE>|g")
+fi
+sed "${sed_args[@]}" tmp_bindings.c > "$LV_MPY_OUTPUT"
 rm tmp_bindings.c
 
 echo -e "${GREEN}${CHECK} Binding generation completed.${NC}"

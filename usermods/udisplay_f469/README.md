@@ -11,6 +11,8 @@ features are explicitly enabled at build time.
 | `UDISPLAY_F469_COMPOSITOR` | `0` | Enable direct RGB565 double buffering for ordinary refreshes, the triple-framebuffer transition compositor, and its Python API. Requires asynchronous DMA2D, RGB565, and the configured SDRAM layout. |
 | `UDISPLAY_F469_RGB565` | `0` | Use RGB565 for the LTDC layer and all compositor framebuffers. Required by the compositor path. |
 | `UDISPLAY_LVGL_POOL_IN_SDRAM` | `0` | Allocate LVGL objects from the configured SDRAM pool and trace it during MicroPython garbage collection. |
+| `UDISPLAY_LV_CONF_OVERRIDE` | empty | Include a consumer-supplied header at the end of `lv_conf.h`. |
+| `UDISPLAY_LV_MPY` | empty | Include a consumer-supplied generated MicroPython binding instead of `lv_mpy.c`. It must match the selected LVGL configuration. |
 | `F469_SDRAM_LAYOUT` | `0` | Use a consumer-supplied `sdram_layout.h` for framebuffer, LVGL pool, and RAM-disk regions. Its directory must be on the compiler include path. |
 
 A compositor build uses:
@@ -24,9 +26,16 @@ make disco \
     UDISPLAY_LVGL_POOL_IN_SDRAM=1
 ```
 
-Leaving these variables unset preserves the previous framebuffer count, draw
-format, blocking flush behavior, touch handling, SDRAM API, and Python display
-API.
+Leaving these variables unset keeps the single-framebuffer, blocking-flush,
+full-widget configuration and its existing SDRAM and Python display APIs.
+
+When overriding the LVGL feature set, regenerate the matching binding with:
+
+```console
+LV_CONF_OVERRIDE=/absolute/path/to/lv_conf_override.h \
+LV_MPY_OUTPUT=/absolute/path/to/lv_mpy.c \
+./generate-bindings.sh
+```
 
 In a compositor build, LVGL renders directly into one of two full RGB565
 framebuffers in SDRAM. The display coordinator publishes the completed buffer

@@ -1083,6 +1083,10 @@ extern void mp_lv_deinit_gc();
 
 /*Vector graphic demo*/
 #define LV_USE_DEMO_VECTOR_GRAPHIC  0
+#ifdef UDISPLAY_LV_CONF_OVERRIDE
+#include UDISPLAY_LV_CONF_OVERRIDE
+#endif
+
 /*--END OF LV_CONF_H--*/
 
 #endif /*LV_CONF_H*/

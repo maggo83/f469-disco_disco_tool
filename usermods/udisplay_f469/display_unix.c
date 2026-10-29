@@ -53,10 +53,12 @@ const mp_obj_module_t display_user_cmodule = {
     .globals = (mp_obj_dict_t*)&display_module_globals,
 };
 
-#include "lv_mpy.c"
+#ifndef UDISPLAY_LV_MPY
+#define UDISPLAY_LV_MPY "lv_mpy.c"
+#endif
+#include UDISPLAY_LV_MPY
 // Register the module to make it available in Python
 MP_REGISTER_MODULE(MP_QSTR_udisplay, display_user_cmodule);
 MP_REGISTER_MODULE(MP_QSTR_lvgl, mp_module_lvgl);
 
 #endif // MODULE_DISPLAY_ENABLED
-
