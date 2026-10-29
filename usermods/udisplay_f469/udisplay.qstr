@@ -1,4 +1,5 @@
 Q(display)
+Q(clear_framebuffers)
 Q(get_selected_version)
 Q(set_fixed_size)
 Q(get_fixed_size)

@@ -1,4 +1,4 @@
-from udisplay import update, on, off, set_rotation
+from udisplay import clear_framebuffers, update, on, off, set_rotation
 
 def init(autoupdate=True):
     import lvgl as lv
